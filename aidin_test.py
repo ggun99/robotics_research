@@ -1,5 +1,10 @@
 import usb
 import can
+from matplotlib import pyplot as plt
+import time
+import pyqtgraph as pg
+from pyqtgraph.Qt import QtWidgets
+import numpy as np
 
 class AFT20D15:
     def __init__(self, mode) -> None:
@@ -54,6 +59,33 @@ class AFT20D15:
         return ft
     def shutdown(self):
         self.bus.shutdown()
+
+# PyQtGraph 애플리케이션 생성
+app = QtWidgets.QApplication([])
+
+# 창 및 그래프 초기화
+win = pg.GraphicsLayoutWidget(show=True, title="Real-Time Plot")
+win.resize(800, 400)
+win.setWindowTitle('Real-Time Plot')
+
+# 플롯 추가
+plot = win.addPlot(title="Real-Time Data")
+curve = plot.plot(pen='y')  # 노란색 선
+plot.setLabel('left', 'Amplitude')
+plot.setLabel('bottom', 'Time', 's')
+plot.addLegend()  # 범례 추가
+
+# 3개의 곡선 추가
+curve1 = plot.plot(pen='r', name="Data 1")  # 빨간 선
+curve2 = plot.plot(pen='g', name="Data 2")  # 초록 선
+curve3 = plot.plot(pen='b', name="Data 3")  # 파란 선
+
+
+time_data = []
+force_data = [[], [], []]
+start_t = time.time()
+update_interval = 0.001  # 1ms aidin sensor's fps
+
 if __name__ == "__main__":
     sensor = AFT20D15(mode="robotell")
     try:
@@ -61,9 +93,29 @@ if __name__ == "__main__":
         while True:
             ft = sensor.receive()
             print(f"> ft: {ft}")
+            cur_t = time.time()
+            t = cur_t - start_t
+            time_data.append(t)
+            force_data[0].append(ft[0])
+            force_data[1].append(ft[1])
+            force_data[2].append(ft[2])
+            # 곡선 업데이트
+            curve1.setData(time_data, force_data[0])
+            curve2.setData(time_data, force_data[1])
+            curve3.setData(time_data, force_data[2])
+
+            # GUI 이벤트 처리
+            app.processEvents()
+
+            # 업데이트 간격 대기
+            time.sleep(update_interval)
+        
     except KeyboardInterrupt:
         sensor.shutdown()
         print("Stopped script")
+        # 그래프 종료 후 상호작용 모드 끄기
+        plt.ioff()
+        plt.show()
     # for _ in range(2):
     #     data = sensor.bus.recv(1)
     #     print(f"> data: {data}")
