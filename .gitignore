@@ -1,0 +1,35 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# IPython
+profile_default/
+ipython_config.py
+
+# plot data
+*.mp4
+
+# folder
+# test/
+
+# python setup.py install
+build/
+dist/
+*.egg-info/
+
+# vscode
+.vscode/
+
+# pointcloud and stl
+*.pcd
+*.bag
+
+# neural net weight
+*.pt
+
+# new data for experiement
+datasets/
