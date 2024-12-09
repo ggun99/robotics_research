@@ -1,7 +1,7 @@
 import numpy as np
 
 class AdmittanceController:
-    def __init__(self, M, B, K, dt):
+    def __init__(self, M, B, K):
         """
         Initialize the Admittance Controller.
 
@@ -14,13 +14,13 @@ class AdmittanceController:
         self.M = M
         self.B = B
         self.K = K
-        self.dt = dt
+        # self.dt = dt
 
         # State variables
         self.position = np.zeros(6)  # [x, y, z, roll, pitch, yaw]
         self.velocity = np.zeros(6)  # [vx, vy, vz, omega_roll, omega_pitch, omega_yaw]
 
-    def update(self, force_torque):
+    def update(self, force_torque, dt):
         """
         Update the position and velocity based on the force-torque input.
 
@@ -34,10 +34,10 @@ class AdmittanceController:
         acc = np.linalg.inv(self.M) @ (force_torque - self.B @ self.velocity - self.K @ self.position)
 
         # Update velocity: v = v + a * dt
-        self.velocity += acc * self.dt
+        self.velocity += acc * dt
 
         # Update position: x = x + v * dt
-        self.position += self.velocity * self.dt
+        self.position += self.velocity * dt
 
         return self.position
 
@@ -50,7 +50,7 @@ if __name__ == "__main__":
     dt = 0.01  # Time step
 
     # Initialize controller
-    admittance_controller = AdmittanceController(M, B, K, dt)
+    admittance_controller = AdmittanceController(M, B, K)
 
     # Simulated force-torque input (example)
     force_torque_input = np.array([5.0, 0.0, -2.0, 0.0, 0.1, 0.0])  # [Fx, Fy, Fz, Tx, Ty, Tz]
