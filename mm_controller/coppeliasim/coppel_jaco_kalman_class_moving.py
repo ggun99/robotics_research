@@ -32,7 +32,8 @@ class Coppeliasim():
         self.Sigma_previous = None
         self.Vt_previous = None
         self.sim = sim
-        self.dummy = self.sim.getObject('/Dummy')
+        # self.dummy = self.sim.getObject('/Dummy')
+        self.dummy_move = self.sim.getObjectHandle('/Dummy')
         self.f_L = self.sim.getObjectHandle('/base_link_respondable/front_left_wheel')
         self.f_R = self.sim.getObjectHandle('/base_link_respondable/front_right_wheel')
         self.r_L = self.sim.getObjectHandle('/base_link_respondable/rear_left_wheel')
@@ -77,7 +78,7 @@ class Coppeliasim():
         self.sim.setJointTargetVelocity(self.j6_h, j6_tv)
         return w_R, w_L, wc
 
-    def coppeliasim(self, Kalman,Jacobian, dt, X_d_list, coppel_controller):
+    def coppeliasim(self, Kalman,Jacobian, dt, X_d_list, coppel_controller, velocity):
         covariance, A, B, Q, H, R = Kalman.kalman_init(dt)
 
         # s = f'Simulation time: {t:.2f} [s]'
@@ -115,14 +116,16 @@ class Coppeliasim():
             print(e)
             U, Sigma, Vt = self.U_previous, self.Sigma_previous, self.Vt_previous  # 이전 값 사용
 
-        
-        X_d = self.sim.getObjectPosition(self.dummy, -1)
-        X_d = np.array(X_d)
+        # velocity = [0.003, 0.003, 0.005]  # Change per simulation step (for each axis)
+        X_d = self.sim.getObjectPosition(self.dummy_move, -1)
+        X_d_array = np.array(X_d)
         X_c = self.sim.getObjectPosition(self.Ur5_EE, -1)
         X_c = np.array(X_c)
+        X_d_list.append(X_d_array)
 
-        
-        X_d_list.append(X_d)
+         # Update the dummy position over time
+        new_position = [X_d[0] + velocity[0], X_d[1] + velocity[1], X_d[2] + velocity[2]]
+        self.sim.setObjectPosition(self.dummy_move, -1, new_position)
 
         if len(X_d_list) > 9:
             # print(f"==>> len(X_d_list): {len(X_d_list)}")
@@ -139,7 +142,7 @@ class Coppeliasim():
             A_future[0:3, 3:6] *= future_time_step  # Adjust for future velocity scaling
             predicted_future_state, _ = Kalman.kalman_filter_predict(self.state, covariance, A_future, B, control_input, Q)
             # print(f"==>> predicted_future_state: {predicted_future_state}")
-            X_d = predicted_future_state[0:3].flatten()
+            X_d_array = predicted_future_state[0:3].flatten()
             X_d_list.pop(0)
 
         else:

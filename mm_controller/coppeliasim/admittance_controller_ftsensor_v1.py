@@ -6,7 +6,8 @@ import os
 from matplotlib import pyplot as plt
 import time
 import pyqtgraph as pg
-from pyqtgraph.Qt import QtWidgets
+import PySide2
+from PySide2 import QtWidgets, QtCore
 import numpy as np
 
 wd = os.path.abspath(os.getcwd())

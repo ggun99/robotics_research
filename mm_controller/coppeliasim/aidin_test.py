@@ -99,7 +99,7 @@ if __name__ == "__main__":
             force_data[0].append(ft[0])
             force_data[1].append(ft[1])
             force_data[2].append(ft[2])
-
+            print(force_data)
             # 곡선 업데이트
             curve1.setData(time_data, force_data[0])
             curve2.setData(time_data, force_data[1])
