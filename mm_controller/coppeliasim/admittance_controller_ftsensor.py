@@ -90,7 +90,7 @@ K = np.diag([50.0, 50.0, 50.0, 5.0, 5.0, 5.0])  # Stiffness matrix
 dt = 0.001  # Time step
 
 # Initialize controller
-admittance_controller = AdmittanceController(M, B, K, dt)
+admittance_controller = AdmittanceController(M, B, K)
 
 # Filter requirements.
 cutoff = 5.0  # 저역통과 필터의 컷오프 주파수
@@ -122,7 +122,7 @@ if __name__ == "__main__":
             curve2.setData(time_data, force_data[1])
             curve3.setData(time_data, force_data[2])
 
-            # print('rmse', np.mean(force_data[0]), np.mean(force_data[1]), np.mean(force_data[2]))
+            print('rmse', np.mean(force_data[0]), np.mean(force_data[1]), np.mean(force_data[2]))
             threshold = 0.6
 
             if np.abs(ft[0]+3.8) < threshold:

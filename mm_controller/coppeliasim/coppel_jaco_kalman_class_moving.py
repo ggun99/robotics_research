@@ -96,15 +96,15 @@ class Coppeliasim():
         
         # J_ = R @ J
         j_J = J @ J.T
-        j_J = j_J / np.max(np.abs(j_J))
-        if np.isnan(j_J).any() or np.isinf(j_J).any():
-            print("j_J contains NaN or Inf values.")
-        cond = np.linalg.cond(j_J)
-        print(f"Condition number: {cond}")
-        if cond > 1e10:  # 조건수가 너무 큰 경우
-            print("Matrix is ill-conditioned.")
-        max_val = np.max(np.abs(j_J))
-        print(f"Max value in j_J: {max_val}")
+        # j_J = j_J / np.max(np.abs(j_J))
+        # if np.isnan(j_J).any() or np.isinf(j_J).any():
+        #     print("j_J contains NaN or Inf values.")
+        # cond = np.linalg.cond(j_J)
+        # print(f"Condition number: {cond}")
+        # if cond > 1e10:  # 조건수가 너무 큰 경우
+        #     print("Matrix is ill-conditioned.")
+        # max_val = np.max(np.abs(j_J))
+        # print(f"Max value in j_J: {max_val}")
         U, Sigma, Vt = scipy.linalg.svd(j_J, full_matrices=True)
         
         # SVD 계산
@@ -124,7 +124,9 @@ class Coppeliasim():
         X_d_list.append(X_d_array)
 
          # Update the dummy position over time
-        new_position = [X_d[0] + velocity[0], X_d[1] + velocity[1], X_d[2] + velocity[2]]
+        new_position = [X_d[0] + velocity[0]*0.01, X_d[1] + velocity[1]*0.01, X_d[2] + velocity[2]*0.01]
+        print(f"==>> new_position: {new_position}")
+        print(f"==>> X_d: {X_d}")
         self.sim.setObjectPosition(self.dummy_move, -1, new_position)
 
         if len(X_d_list) > 9:
@@ -188,7 +190,7 @@ class Coppeliasim():
         angle_con_value = 1.0
         # 최대 속도 한계 설정 (예시)
         max_q_dot = 0.1 # 최대 속도 한계를 설정
-        print('distance: ', np.linalg.norm(d_goal))
+        # print('distance: ', np.linalg.norm(d_goal))
         if np.linalg.norm(d_goal) < 0.01:
             # self.previous_time = t 
             # 최대 힘 제한을 설정
