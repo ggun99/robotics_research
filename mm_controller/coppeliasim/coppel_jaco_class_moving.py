@@ -2,7 +2,6 @@ import time
 import sys
 import os
 import math
-
 import scipy.linalg
 from sympy import Max
 
@@ -79,7 +78,7 @@ class Coppeliasim():
         return w_R, w_L, wc
 
     def coppeliasim(self, Kalman,Jacobian, dt, X_d_list, coppel_controller, velocity):
-        covariance, A, B, Q, H, R = Kalman.kalman_init(dt)
+        # covariance, A, B, Q, H, R = Kalman.kalman_init(dt)
 
         # s = f'Simulation time: {t:.2f} [s]'
         # print(s)
@@ -110,37 +109,27 @@ class Coppeliasim():
         X_d_array = np.array(X_d)
         X_c = self.sim.getObjectPosition(self.Ur5_EE, -1)
         X_c = np.array(X_c)
-        X_d_list.append(X_d_array)
+        # X_d_list.append(X_d_array)
 
          # Update the dummy position over time
         new_position = [X_d[0] + velocity[0]*0.01, X_d[1] + velocity[1]*0.01, X_d[2] + velocity[2]*0.01]
-        print(f"==>> new_position: {new_position}")
-        print(f"==>> X_d: {X_d}")
+        # print(f"==>> new_position: {new_position}")
+        # print(f"==>> X_d: {X_d}")
         self.sim.setObjectPosition(self.dummy_move, -1, new_position)
 
-        if len(X_d_list) > 9:
-            # print(f"==>> len(X_d_list): {len(X_d_list)}")
-            for i, z in enumerate(X_d_list):
-                z = np.array(z).reshape(-1, 1)  # Convert to column vector
-                # Prediction step
-                control_input = np.array([0, 0, 0]).reshape(-1, 1)  # No control input
-                predicted_state, predicted_covariance = Kalman.kalman_filter_predict(self.state, covariance, A, B, control_input, Q)
-                # Update step
-                self.state, covariance = Kalman.kalman_filter_update(predicted_state, predicted_covariance, H, z, R)
-            future_time_step = 3.0  # Time steps to predict into the future
-            A_future = A.copy()
-            # print(f"==>> A_future: {A_future}")
-            A_future[0:3, 3:6] *= future_time_step  # Adjust for future velocity scaling
-            predicted_future_state, _ = Kalman.kalman_filter_predict(self.state, covariance, A_future, B, control_input, Q)
-            # print(f"==>> predicted_future_state: {predicted_future_state}")
-            X_d_array = predicted_future_state[0:3].flatten()
-            X_d_list.pop(0)
+        # # Filter requirements.
+        # cutoff = 5.0  # 저역통과 필터의 컷오프 주파수
+        # fs = 60.0     # 프레임 속도 (초당 프레임)
+        # order = 3     # 필터 차수
 
-        else:
+        # if len(X_d_list) > 50:
+        #     X_d_list.pop(0)
             
-            X_d_array = np.array([X_d[0], X_d[1], X_d[2],(X_d[0]-self.state[3][0])/dt, (X_d[1]-self.state[4][0])/dt, (X_d[2]-self.state[5][0])/dt ]).reshape(-1, 1)
-        d_goal = X_d - X_c
-        d_goal_2D = X_d[:2] - X_c[:2]
+        # print('butter filtered')
+        # X_d_array = np.array([X_d[0], X_d[1], X_d[2],(X_d[0]-self.state[3][0])/dt, (X_d[1]-self.state[4][0])/dt, (X_d[2]-self.state[5][0])/dt])
+
+        d_goal = X_d_array[:3] - X_c
+        d_goal_2D = X_d_array[:2] - X_c[:2]
         d_goal_unit = d_goal/np.linalg.norm(d_goal)
         d_goal_unit_2D = d_goal_2D/np.linalg.norm(d_goal_2D)
         manipulability_direction = U[:, 0]
@@ -149,12 +138,10 @@ class Coppeliasim():
 
         # 시작점 (엔드 이펙터 위치)
         start_point = X_c
-        print(f"==>> start_point: {start_point}")
 
         # 벡터 끝점 정의 (스케일 조절 가능)
         scale = 0.2  # 화살표 길이를 조정하는 스케일링 값
         end_point_ = start_point + scale * d_goal_unit
-        print(f"==>> end_point_: {end_point_}")
         
         # 화살표 생성 (start_point에서 end_point로)
         line_handle = self.sim.addDrawingObject(
@@ -177,18 +164,29 @@ class Coppeliasim():
         # self.sim.addDrawingObjectItem(line_handle_, list(start_point.tolist()) + list(end_point_.tolist()))
         # self.sim.addDrawingObjectItem(line_handle_, start_point + end_point_)
         # NumPy 배열을 Python 리스트로 변환
-        start_point = start_point.tolist()
-        end_point_ = end_point_.tolist()
+        start_point = start_point.tolist()# if isinstance(start_point, np.ndarray) else start_point
+        end_point_ = end_point_.tolist()# if isinstance(end_point_, np.ndarray) else end_point_
+
+        # # 모든 값을 플로트로 변환
+        # start_point = [float(value) for value in start_point]
+        # end_point_ = [float(value) for value in end_point_]
+
+        # # 크기 검증 (3차원 리스트인지 확인)
+        # assert len(start_point) == 3, f"start_point의 길이가 3이 아님: {start_point}"
+        # assert len(end_point_) == 3, f"end_point_의 길이가 3이 아님: {end_point_}"
+
+        # # NaN/Inf 값 확인
+        # assert not any(np.isnan(value) or np.isinf(value) for value in start_point), f"start_point에 NaN/Inf 값이 포함됨: {start_point}"
+        # assert not any(np.isnan(value) or np.isinf(value) for value in end_point_), f"end_point_에 NaN/Inf 값이 포함됨: {end_point_}"
 
         # 함수 호출
         self.sim.addDrawingObjectItem(line_handle_, start_point + end_point_)
 
-        time_interval = 0.05
-        angle_con_value = 1.0
         # 최대 속도 한계 설정 (예시)
         max_q_dot = 0.1 # 최대 속도 한계를 설정
         # print('distance: ', np.linalg.norm(d_goal))
-        if np.linalg.norm(d_goal) < 0.01:
+        distance = np.linalg.norm(d_goal)
+        if distance < 0.01:
             # self.previous_time = t 
             # 최대 힘 제한을 설정
             self.sim.setJointForce(self.j1_h, self.maxForce)
@@ -201,11 +199,11 @@ class Coppeliasim():
             a_v = 0.0
             w_R, w_L, _ = self.set_velocity(l_v, a_v, 0, 0, 0, 0, 0, 0, coppel_controller)
 
-        elif np.linalg.norm(d_goal) > 0.25:
+        elif distance > 0.10:
             # self.previous_time = t 
             l_v, a_v = coppel_controller.kinematic_control(self.integral_dist, self.previous_err_dist,self.integral_theta, self.previous_err_theta, d_goal_2D[0]*10, d_goal_2D[1]*10) #cm
 
-            vectorsize = 0.002
+            vectorsize = 0.02
             new_d_goal = d_goal_unit * vectorsize
             d_goal_v = new_d_goal/(dt)
             epsilon = 1e-6  # 작은 특이값에 대한 임계값
