@@ -5,12 +5,12 @@ class Jacobian():
         pass
     def jacobian(self, j1_r, j2_r, j3_r, j4_r, j5_r, j6_r):
         # UR5e Joint value (radian)
-        j = np.array([float(j1_r), float(j2_r), float(j3_r), float(j4_r), float(j5_r), float(j6_r)])
+        j = np.array([float(j1_r), float(j2_r)+1.5707963267948966, float(j3_r), float(j4_r)-1.5707963267948966, float(j5_r), float(j6_r)])
 
         # UR5e DH parameters
-        a = np.array([0., -0.425, -0.3922, 0., 0., 0.])
-
-        d = np.array([0.1625, 0., 0., 0.1333, 0.0997, 0.0996])
+        a = np.array([0., 0.425, 0.392, 0., 0., 0.])
+        d = np.array([0.,0.,0.,0.133,0.100,0.])
+        # d = np.array([0.1625, 0., 0., 0.1333, 0.0997, 0.0996])
 
         alpha = np.array([np.pi/2, 0., 0., np.pi/2, -np.pi/2, 0.])
         # Jacobian matrix
@@ -51,6 +51,6 @@ class Jacobian():
         J64 = 0
         J65 = np.cos(j[1]+j[2]+j[3])
         J66 = np.sin(j[1]+j[2]+j[3])*np.sin(j[4])
-        J = np.array([[J11, J12, J13, J14, J15, J16], [J21, J22, J23, J24, J25, J26], [J31, J32, J33, J34, J35, J36], [J41, J42, J44, J44, J45, J46], [J51, J52, J55, J54, J55, J56], [J61, J62, J66, J64, J65, J66]])
+        J = np.array([[J11, J12, J13, J14, J15, J16], [J21, J22, J23, J24, J25, J26], [J31, J32, J33, J34, J35, J36], [J41, J42, J43, J44, J45, J46], [J51, J52, J53, J54, J55, J56], [J61, J62, J63, J64, J65, J66]])
 
         return J

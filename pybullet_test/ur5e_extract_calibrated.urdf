@@ -8,7 +8,7 @@
       <inertia ixx="0.00443333156" ixy="0.0" ixz="0.0" iyy="0.00443333156" iyz="0.0" izz="0.0072"/>
     </inertial>
     <visual>
-      <origin xyz="0.0 0.0 0.0" rpy="0.0 0.0 0.0"/>
+      <origin xyz="0.0 0.0 0.0" rpy="0.0 0.0 3.141592653589793"/>
       <geometry>
         <mesh filename="/home/airlab/workspace/ur_ws/src/Universal_Robots_ROS2_Driver/ur_description/meshes/ur5e/visual/base.dae"/>
       </geometry>
@@ -17,7 +17,7 @@
       </material>
     </visual>
     <collision>
-      <origin xyz="0.0 0.0 0.0" rpy="0.0 0.0 0.0"/>
+      <origin xyz="0.0 0.0 0.0" rpy="0.0 0.0 3.141592653589793"/>
       <geometry>
         <mesh filename="/home/airlab/workspace/ur_ws/src/Universal_Robots_ROS2_Driver/ur_description/meshes/ur5e/collision/base.stl"/>
       </geometry>
