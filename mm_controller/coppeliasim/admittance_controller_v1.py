@@ -1,5 +1,7 @@
 import numpy as np
 
+from mm_controller.coppeliasim import forward_kinematics_ur5e
+
 class AdmittanceController:
     def __init__(self, M, B, K):
         """
@@ -53,6 +55,16 @@ class AdmittanceController:
         self.position += self.velocity * dt
 
         return self.position, acc
+
+    def forward_kinematics_ur5e(self, q):
+        
+        T = np.array([ 
+                [ np.cos(q[5]) * (np.sin(q[0]) * np.sin(q[4]) + np.cos(q[1] + q[2] + q[3]) * np.cos(q[0]) * np.cos(q[4])) - np.sin(q[1] + q[2] + q[3]) * np.cos(q[0]) * np.sin(q[5]), -np.sin(q[5]) * (np.sin(q[0]) * np.sin(q[4]) + np.cos(q[1] + q[2] + q[3]) * np.cos(q[0]) * np.cos(q[4])) - np.sin(q[1] + q[2] + q[3]) * np.cos(q[0]) * np.cos(q[5]), np.cos(q[4]) * np.sin(q[0]) - np.cos(q[1] + q[2] + q[3]) * np.cos(q[0]) * np.sin(q[4]), d6 * (np.cos(q[4]) * np.sin(q[0]) - np.cos(q[1] + q[2] + q[3]) * np.cos(q[0]) * np.sin(q[4])) + d4 * np.sin(q[0]) + a2 * np.cos(q[0]) * np.cos(q[1]) + d5 * np.sin(q[1] + q[2] + q[3]) * np.cos(q[0]) + a3 * np.cos(q[0]) * np.cos(q[1]) * np.cos(q[2]) - a3 * np.cos(q[0]) * np.sin(q[1]) * np.sin(q[2]) ],
+                [ -np.cos(q[5]) * (np.cos(q[0]) * np.sin(q[4]) - np.cos(q[1] + q[2] + q[3]) * np.cos(q[4]) * np.sin(q[0])) - np.sin(q[1] + q[2] + q[3]) * np.sin(q[0]) * np.sin(q[5]), np.sin(q[5]) * (np.cos(q[0]) * np.sin(q[4]) - np.cos(q[1] + q[2] + q[3]) * np.cos(q[4]) * np.sin(q[0])) - np.sin(q[1] + q[2] + q[3]) * np.cos(q[5]) * np.sin(q[0]), -np.cos(q[0]) * np.cos(q[4]) - np.cos(q[1] + q[2] + q[3]) * np.sin(q[0]) * np.sin(q[4]), a2 * np.cos(q[1]) * np.sin(q[0]) - d4 * np.cos(q[0]) - d6 * (np.cos(q[0]) * np.cos(q[4]) + np.cos(q[1] + q[2] + q[3]) * np.sin(q[0]) * np.sin(q[4])) + d5 * np.sin(q[1] + q[2] + q[3]) * np.sin(q[0]) + a3 * np.cos(q[1]) * np.cos(q[2]) * np.sin(q[0]) - a3 * np.sin(q[0]) * np.sin(q[1]) * np.sin(q[2]) ],
+                [ np.cos(q[1] + q[2] + q[3]) * np.sin(q[5]) + np.sin(q[1] + q[2] + q[3]) * np.cos(q[4]) * np.cos(q[5]), np.cos(q[1] + q[2] + q[3]) * np.cos(q[5]) - np.sin(q[1] + q[2] + q[3]) * np.cos(q[4]) * np.sin(q[5]), -np.sin(q[1] + q[2] + q[3]) * np.sin(q[4]), d1 + d5 * (np.sin(q[1] + q[2]) * np.sin(q[3]) - np.cos(q[1] + q[2]) * np.cos(q[3])) + a3 * np.sin(q[1] + q[2]) + a2 * np.sin(q[1]) - d6 * np.sin(q[4]) * (np.cos(q[1] + q[2]) * np.sin(q[3]) + np.sin(q[1] + q[2]) * np.cos(q[3])) ],
+                [0, 0, 0, 1]
+                ])
+        return T
 
 # Example usage
 if __name__ == "__main__":
