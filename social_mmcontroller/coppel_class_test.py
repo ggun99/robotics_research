@@ -2,12 +2,14 @@ import time
 import sys
 import os
 import math
+
 import scipy.linalg
 from sympy import Max
 
 wd = os.path.abspath(os.getcwd())
 sys.path.append(str(wd))
 sys.path.append("/home/airlab/Documents/CoppeliaSim_Edu_V4_4_0_rev0_Ubuntu20_04/programming/zmqRemoteApi/clients/python")
+sys.path.append("/home/airlab/robotics_research/mm_controller/coppeliasim")
 from cv2 import waitKey
 import numpy as np
 from zmqRemoteApi import RemoteAPIClient
@@ -57,6 +59,7 @@ class Coppeliasim():
         self.j5_h = self.sim.getObjectHandle('/base_link_respondable/UR5/joint/joint/joint/joint/joint')
         self.j6_h = self.sim.getObjectHandle('/base_link_respondable/UR5/joint/joint/joint/joint/joint/joint')
         
+        self.wall = self.sim.getObjectHandle('/Dummy0')
         
     def moveToAngle_RL(self, w_R, w_L):
         vel_r = w_R
@@ -78,7 +81,7 @@ class Coppeliasim():
         return w_R, w_L, wc
 
     def coppeliasim(self, Kalman,Jacobian, dt, X_d_list, coppel_controller):
-        # covariance, A, B, Q, H, R = Kalman.kalman_init(dt)
+        covariance, A, B, Q, H, R = Kalman.kalman_init(dt)
 
         # s = f'Simulation time: {t:.2f} [s]'
         # print(s)
@@ -104,89 +107,27 @@ class Coppeliasim():
             print(e)
             U, Sigma, Vt = self.U_previous, self.Sigma_previous, self.Vt_previous  # 이전 값 사용
 
-        velocity = [0.003, 0.003, 0.005]  # Change per simulation step (for each axis)
+        velocity = [-0.09, 0.0, 0.0]  # Change per simulation step (for each axis)
         X_d = self.sim.getObjectPosition(self.dummy_move, -1)
         X_d_array = np.array(X_d)
         X_c = self.sim.getObjectPosition(self.Ur5_EE, -1)
         X_c = np.array(X_c)
-        # X_d_list.append(X_d_array)
+        X_d_list.append(X_d_array)
 
          # Update the dummy position over time
         new_position = [X_d[0] + velocity[0]*0.01, X_d[1] + velocity[1]*0.01, X_d[2] + velocity[2]*0.01]
-        # print(f"==>> new_position: {new_position}")
-        # print(f"==>> X_d: {X_d}")
+        print(f"==>> new_position: {new_position}")
+        print(f"==>> X_d: {X_d}")
         self.sim.setObjectPosition(self.dummy_move, -1, new_position)
 
-        # # Filter requirements.
-        # cutoff = 5.0  # 저역통과 필터의 컷오프 주파수
-        # fs = 60.0     # 프레임 속도 (초당 프레임)
-        # order = 3     # 필터 차수
-
-        # if len(X_d_list) > 50:
-        #     X_d_list.pop(0)
-            
-        # print('butter filtered')
-        # X_d_array = np.array([X_d[0], X_d[1], X_d[2],(X_d[0]-self.state[3][0])/dt, (X_d[1]-self.state[4][0])/dt, (X_d[2]-self.state[5][0])/dt])
-
-        d_goal = X_d_array[:3] - X_c
-        d_goal_2D = X_d_array[:2] - X_c[:2]
+        d_goal = X_d - X_c
+        d_goal_2D = X_d[:2] - X_c[:2]
         d_goal_unit = d_goal/np.linalg.norm(d_goal)
-        d_goal_unit_2D = d_goal_2D/np.linalg.norm(d_goal_2D)
-        manipulability_direction = U[:, 0]
-        manipulability_direction_array = np.array(manipulability_direction)
-
-
-        # 시작점 (엔드 이펙터 위치)
-        start_point = X_c
-
-        # 벡터 끝점 정의 (스케일 조절 가능)
-        scale = 0.2  # 화살표 길이를 조정하는 스케일링 값
-        end_point_ = start_point + scale * d_goal_unit
-        
-        # 화살표 생성 (start_point에서 end_point로)
-        line_handle = self.sim.addDrawingObject(
-                self.sim.drawing_lines,  # objectType: 선 그리기
-                0.01,               # size: 선 두께
-                0.0,                # duplicateTolerance: 중복 허용 (0으로 비활성화)
-                -1,                 # parentHandle: 월드 좌표계
-                2,                  # maxItemCount: 최대 2개의 점 (시작점과 끝점)
-                [1, 0, 0]           # 색상: 빨간색 (RGB)
-            )
-        line_handle_ = self.sim.addDrawingObject(
-                self.sim.drawing_lines,  # objectType: 선 그리기
-                0.01,               # size: 선 두께
-                0.0,                # duplicateTolerance: 중복 허용 (0으로 비활성화)
-                -1,                 # parentHandle: 월드 좌표계
-                2,                  # maxItemCount: 최대 2개의 점 (시작점과 끝점)
-                [0, 1, 0]           # 색상: 빨간색 (RGB)
-            )
-        # self.sim.addDrawingObjectItem(line_handle, list(start_point) + list(end_point))
-        # self.sim.addDrawingObjectItem(line_handle_, list(start_point.tolist()) + list(end_point_.tolist()))
-        # self.sim.addDrawingObjectItem(line_handle_, start_point + end_point_)
-        # NumPy 배열을 Python 리스트로 변환
-        start_point = start_point.tolist()# if isinstance(start_point, np.ndarray) else start_point
-        end_point_ = end_point_.tolist()# if isinstance(end_point_, np.ndarray) else end_point_
-
-        # # 모든 값을 플로트로 변환
-        # start_point = [float(value) for value in start_point]
-        # end_point_ = [float(value) for value in end_point_]
-
-        # # 크기 검증 (3차원 리스트인지 확인)
-        # assert len(start_point) == 3, f"start_point의 길이가 3이 아님: {start_point}"
-        # assert len(end_point_) == 3, f"end_point_의 길이가 3이 아님: {end_point_}"
-
-        # # NaN/Inf 값 확인
-        # assert not any(np.isnan(value) or np.isinf(value) for value in start_point), f"start_point에 NaN/Inf 값이 포함됨: {start_point}"
-        # assert not any(np.isnan(value) or np.isinf(value) for value in end_point_), f"end_point_에 NaN/Inf 값이 포함됨: {end_point_}"
-
-        # 함수 호출
-        self.sim.addDrawingObjectItem(line_handle_, start_point + end_point_)
 
         # 최대 속도 한계 설정 (예시)
         max_q_dot = 0.1 # 최대 속도 한계를 설정
         # print('distance: ', np.linalg.norm(d_goal))
-        distance = np.linalg.norm(d_goal)
-        if distance < 0.01:
+        if np.linalg.norm(d_goal) < 0.01:
             # self.previous_time = t 
             # 최대 힘 제한을 설정
             self.sim.setJointForce(self.j1_h, self.maxForce)
@@ -199,40 +140,11 @@ class Coppeliasim():
             a_v = 0.0
             w_R, w_L, _ = self.set_velocity(l_v, a_v, 0, 0, 0, 0, 0, 0, coppel_controller)
 
-        elif distance > 0.10:
-            # self.previous_time = t 
-            l_v, a_v = coppel_controller.kinematic_control(self.integral_dist, self.previous_err_dist,self.integral_theta, self.previous_err_theta, d_goal_2D[0]*10, d_goal_2D[1]*10) #cm
-
-            vectorsize = 0.02
-            new_d_goal = d_goal_unit * vectorsize
-            d_goal_v = new_d_goal/(dt)
-            epsilon = 1e-6  # 작은 특이값에 대한 임계값
-            Sigma_inv = np.diag(1.0 / (Sigma + epsilon))  # 작은 특이값에 임계값을 더하여 안정화
-            # pseudo inverse jacobian matrix
-            J_pseudo = Vt.T @ Sigma_inv @ U.T
-            
-            
-            q_dot = J_pseudo @ d_goal_v
-
-            # 속도가 한계를 초과하면 제한
-            q_dot = np.clip(q_dot, -max_q_dot, max_q_dot)
-
-            j1_tv = q_dot[0]
-            j2_tv = q_dot[1]
-            j3_tv = q_dot[2]
-
-            # j4_tv = q_dot[3]
-            # j5_tv = q_dot[4]
-            # j6_tv = q_dot[5]
-            w_R, w_L, wc = self.set_velocity(l_v, a_v, j1_tv, j2_tv, j3_tv, 0, 0, 0, coppel_controller)
-
-            self.sim.addDrawingObjectItem(line_handle, None)
-            self.sim.addDrawingObjectItem(line_handle_, None)
-
         else:
             # self.previous_time = t 
             l_v, a_v = coppel_controller.kinematic_control(self.integral_dist, self.previous_err_dist,self.integral_theta, self.previous_err_theta, d_goal_2D[0]*10, d_goal_2D[1]*10) #cm
 
+            vectorsize = 0.002
             new_d_goal = d_goal_unit #* vectorsize
             d_goal_v = new_d_goal/(dt)
             epsilon = 1e-6  # 작은 특이값에 대한 임계값
@@ -240,11 +152,11 @@ class Coppeliasim():
             # pseudo inverse jacobian matrix
             J_pseudo = Vt.T @ Sigma_inv @ U.T
             
-            
             q_dot = J_pseudo @ d_goal_v
 
             # 속도가 한계를 초과하면 제한
             q_dot = np.clip(q_dot, -max_q_dot, max_q_dot)
+
             j1_tv = q_dot[0]
             j2_tv = q_dot[1]
             j3_tv = q_dot[2]
@@ -254,8 +166,7 @@ class Coppeliasim():
             # j6_tv = q_dot[5]
             w_R, w_L, wc = self.set_velocity(l_v, a_v, j1_tv, j2_tv, j3_tv, 0, 0, 0, coppel_controller)
 
-            self.sim.addDrawingObjectItem(line_handle, None)
-            self.sim.addDrawingObjectItem(line_handle_, None)
+
         self.moveToAngle_RL(w_R, w_L)
         
 
