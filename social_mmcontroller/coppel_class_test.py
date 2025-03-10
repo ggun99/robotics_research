@@ -1,3 +1,4 @@
+from hmac import new
 import time
 import sys
 import os
@@ -35,10 +36,12 @@ class Coppeliasim():
         self.sim = sim
         # self.dummy = self.sim.getObject('/Dummy')
         self.dummy_move = self.sim.getObjectHandle('/Dummy')
+        self.dummy_move_mani = self.sim.getObjectHandle('/Dummy[1]')
         self.f_L = self.sim.getObjectHandle('/base_link_respondable/front_left_wheel')
         self.f_R = self.sim.getObjectHandle('/base_link_respondable/front_right_wheel')
         self.r_L = self.sim.getObjectHandle('/base_link_respondable/rear_left_wheel')
         self.r_R = self.sim.getObjectHandle('/base_link_respondable/rear_right_wheel')
+        self.scout = self.sim.getObjectHandle('/base_link_respondable/Dummy')
         # scout_base = sim.getObject('./Dummy')
 
         # scout = sim.getObjectHandle('/UR5')
@@ -59,8 +62,10 @@ class Coppeliasim():
         self.j5_h = self.sim.getObjectHandle('/base_link_respondable/UR5/joint/joint/joint/joint/joint')
         self.j6_h = self.sim.getObjectHandle('/base_link_respondable/UR5/joint/joint/joint/joint/joint/joint')
         
-        self.wall = self.sim.getObjectHandle('/Dummy0')
+        self.wall = self.sim.getObjectHandle('/240cmHighWall50cm/Dummy')
         
+        self.new_position_mani = self.sim.getObjectPosition(self.dummy_move, -1)
+
     def moveToAngle_RL(self, w_R, w_L):
         vel_r = w_R
         vel_l = w_L
@@ -107,23 +112,54 @@ class Coppeliasim():
             print(e)
             U, Sigma, Vt = self.U_previous, self.Sigma_previous, self.Vt_previous  # 이전 값 사용
 
-        velocity = [-0.09, 0.0, 0.0]  # Change per simulation step (for each axis)
+        velocity = [-0.065, 0.0, 0.0]  # Change per simulation step (for each axis)
         X_d = self.sim.getObjectPosition(self.dummy_move, -1)
-        X_d_array = np.array(X_d)
+        X_d = np.array(X_d)
+        X_d_mani = self.sim.getObjectPosition(self.dummy_move_mani, -1)
+        X_d_mani = np.array(X_d_mani)
         X_c = self.sim.getObjectPosition(self.Ur5_EE, -1)
         X_c = np.array(X_c)
-        X_d_list.append(X_d_array)
+        X_scout = self.sim.getObjectPosition(self.scout, -1)
+        X_scout = np.array(X_scout)
+        X_d_list.append(X_d)
 
-         # Update the dummy position over time
-        new_position = [X_d[0] + velocity[0]*0.01, X_d[1] + velocity[1]*0.01, X_d[2] + velocity[2]*0.01]
-        print(f"==>> new_position: {new_position}")
-        print(f"==>> X_d: {X_d}")
-        self.sim.setObjectPosition(self.dummy_move, -1, new_position)
-
-        d_goal = X_d - X_c
-        d_goal_2D = X_d[:2] - X_c[:2]
+        wall = self.sim.getObjectPosition(self.wall, -1)
+        wall = np.array(wall)
+        f_ref = 0.005
+        f_res = 0.005
+        d_max = 0.8
+        
+        d_wall = X_d - wall
+        d_wall_abs = np.linalg.norm(d_wall)
+        d_wall_unit = d_wall/d_wall_abs
+        if d_wall_abs < d_max and d_wall_unit[0] > 0:
+            X_d = X_d + d_wall_unit * f_ref * np.exp(-np.abs(d_wall_abs)/d_max)
+            print(f"==>> d_wall: {d_wall}")
+            print(f"==>> d_wall_abs: {d_wall_abs}")
+            print(f"==>> d_wall_unit: {d_wall_unit}")
+            print(f"==>> 더한값: {d_wall_unit * f_ref * np.exp(-np.abs(d_wall_abs)/d_max)}")
+        elif d_wall_abs < d_max and d_wall_unit[0] < 0:
+            X_restore = X_d_mani - X_d
+            X_restore_unit = X_restore/np.linalg.norm(X_restore)
+            X_d = X_d + d_wall_unit * f_ref * np.exp(-np.abs(d_wall_abs)/d_max) + f_res * X_restore_unit
+            print('여기야ㅑㅑㅑ')
+            # print(f"==>> d_wall_unit: {d_wall_unit}")
+            # print(f"==>> X_d: {X_d}")
+        d_goal = X_d_mani - X_c
+        d_goal_2D = X_d[:2] - X_scout[:2]
         d_goal_unit = d_goal/np.linalg.norm(d_goal)
-
+        print(f"==>> d_goal_unit: {d_goal_unit}")
+        print(f"==>> X_d: {X_d}")
+        # Update the dummy position over time
+        new_position = [X_d[0] + velocity[0]*0.1, X_d[1] + velocity[1]*0.1, X_d[2] + velocity[2]*0.1]
+        # self.new_position_mani = X_d_mani
+        self.new_position_mani = [self.new_position_mani[0] + velocity[0]*0.1, self.new_position_mani[1] + velocity[1]*0.1, self.new_position_mani[2] + velocity[2]*0.1]
+        print(f"==>> self.new_pos: {self.new_position_mani}")
+        print(f"==>> new_position: {new_position}")
+        # print(f"==>> X_d: {X_d}")
+        self.sim.setObjectPosition(self.dummy_move, -1, new_position)
+        self.sim.setObjectPosition(self.dummy_move_mani, -1, self.new_position_mani)
+        
         # 최대 속도 한계 설정 (예시)
         max_q_dot = 0.1 # 최대 속도 한계를 설정
         # print('distance: ', np.linalg.norm(d_goal))

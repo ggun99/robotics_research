@@ -232,8 +232,6 @@ def Rotation_matirx(theta):
                  [0, 0 ,1]])
     return R
 
-def social_force():
-    f_avoid = 
 
 
 try:
