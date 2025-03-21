@@ -134,15 +134,15 @@ class Coppeliasim():
         d_wall_unit = d_wall/d_wall_abs
         if d_wall_abs < d_max and d_wall_unit[0] > 0:
             X_d = X_d + d_wall_unit * f_ref * np.exp(-np.abs(d_wall_abs)/d_max)
-            print(f"==>> d_wall: {d_wall}")
-            print(f"==>> d_wall_abs: {d_wall_abs}")
-            print(f"==>> d_wall_unit: {d_wall_unit}")
-            print(f"==>> 더한값: {d_wall_unit * f_ref * np.exp(-np.abs(d_wall_abs)/d_max)}")
+            # print(f"==>> d_wall: {d_wall}")
+            # print(f"==>> d_wall_abs: {d_wall_abs}")
+            # print(f"==>> d_wall_unit: {d_wall_unit}")
+            # print(f"==>> 더한값: {d_wall_unit * f_ref * np.exp(-np.abs(d_wall_abs)/d_max)}")
         elif d_wall_abs < d_max and d_wall_unit[0] < 0:
             X_restore = X_d_mani - X_d
             X_restore_unit = X_restore/np.linalg.norm(X_restore)
             X_d = X_d + d_wall_unit * f_ref * np.exp(-np.abs(d_wall_abs)/d_max) + f_res * X_restore_unit
-            print('여기야ㅑㅑㅑ')
+            # print('여기야ㅑㅑㅑ')
             # print(f"==>> d_wall_unit: {d_wall_unit}")
             # print(f"==>> X_d: {X_d}")
         d_goal = X_d_mani - X_c
@@ -196,7 +196,7 @@ class Coppeliasim():
             j1_tv = q_dot[0]
             j2_tv = q_dot[1]
             j3_tv = q_dot[2]
-
+            print(f"==>> j1_tv: {j1_tv}, j2_tv: {j2_tv}, j3_tv: {j3_tv}, l_v: {l_v}, a_v: {a_v}")
             # j4_tv = q_dot[3]
             # j5_tv = q_dot[4]
             # j6_tv = q_dot[5]
