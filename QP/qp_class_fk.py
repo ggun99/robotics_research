@@ -7,6 +7,9 @@ from rclpy.node import Node
 from sensor_msgs.msg import JointState
 from geometry_msgs.msg import Twist, WrenchStamped, PoseStamped
 from std_msgs.msg import Float64MultiArray
+from math import cos as cos
+from math import sin as sin
+from math import sqrt as sqrt
 
 class QP_UR5e(Node):
     def __init__(self):
@@ -30,12 +33,22 @@ class QP_UR5e(Node):
         self.p_initialized = False
         self.joint_limits_lower = np.array([0.0, 0.0, -3.14, -3.14, -3.14, -3.14, -3.14, -3.14])  # 하한
         self.joint_limits_upper = np.array([0.0, 0.0, 3.14, 3.14, 3.14, 3.14, 3.14, 3.14])  # 상한
+        # self.d1 =  0.163
+        # self.a2 = -0.425
+        # self.a3 = -0.392
+        # self.d4 =  0.133
+        # self.d5 =  0.1
+        # self.d6 =  0.1
+        self.a = np.array([0., -0.425, -0.392, 0., 0., 0.])
+        self.d = np.array([0.163,0.,0.,0.133,0.100,0.1])
+        self.alpha = np.array([np.pi/2, 0., 0., np.pi/2, -np.pi/2, 0.])
         self.joint_sub = self.create_subscription(JointState, '/joint_states', self.joint_callback, 10)
         self.joint_sub  # prevent unused variable warning
         self.tcp_sub = self.create_subscription(PoseStamped, '/tcp_pose_broadcaster/pose', self.tcp_callback, 10)
         self.q_dot_pub = self.create_publisher(Float64MultiArray, '/forward_velocity_controller/commands', 10)
         self.dt = 0.05
         self.timer = self.create_timer(self.dt, self.qp_solver)
+
 
     def xyzrpy_to_matrix(self, x, y, z, roll, pitch, yaw):
         # 회전 행렬 생성 (ZYX 순: yaw → pitch → roll)
@@ -70,18 +83,53 @@ class QP_UR5e(Node):
         position = msg.pose.position
         orientation = msg.pose.orientation
         r = R.from_quat([orientation.x, orientation.y, orientation.z, orientation.w])
-        euler = r.as_euler('xyz', degrees=False)  # roll, pitch, yaw
+        euler = r.as_euler('xyz')
         self.p = [position.x, position.y, position.z, euler[0], euler[1], euler[2]]  # [x, y, z, roll, pitch, yaw]
         self.p_initialized = True
-        print(self.p)
         # self.p_orientation = msg.pose.orientation
         # self.p_velocity = msg.twist.linear
         # self.p_angular_velocity = msg.twist.angular
+    def dh_transform(self, a, alpha, d, theta):
+        """Denavit-Hartenberg 변환 행렬 생성 함수"""
+        return np.array([
+            [np.cos(theta), -np.sin(theta)*np.cos(alpha),  np.sin(theta)*np.sin(alpha), a*np.cos(theta)],
+            [np.sin(theta),  np.cos(theta)*np.cos(alpha), -np.cos(theta)*np.sin(alpha), a*np.sin(theta)],
+            [0,              np.sin(alpha),                np.cos(alpha),               d],
+            [0,              0,                            0,                           1]
+        ])
 
+    def ur5e_forward_kinematics(self, joints):
+        """
+        UR5e 6-DOF 순방향 기구학 계산
+        joints: 6개의 조인트 각도(rad] 리스트
+        return: 4x4 end-effector 변환 행렬
+        """
+
+        # UR5e 공식 DH 파라미터 (단위: m)
+        dh_params = [
+            (0,        np.pi/2,  0.1625, joints[0]),
+            (-0.425,   0,        0,      joints[1]),
+            (-0.3922,  0,        0,      joints[2]),
+            (0,        np.pi/2,  0.1333, joints[3]),
+            (0,       -np.pi/2,  0.0997, joints[4]),
+            (0,        0,        0.0996, joints[5])
+        ]
+
+        T = np.identity(4)
+        for a, alpha, d, theta in dh_params:
+            T = np.dot(T, self.dh_transform(a, alpha, d, theta))
+  
+        return T
+    
     def qp_solver(self):
         if not self.q_initialized or not self.p_initialized:
             print("Waiting for joint states and TCP position...")
             return
+        T = self.ur5e_forward_kinematics(self.q[2:8])  # UR5e FK 계산
+        # print('T:', T)
+        x_,y_,z_,roll,pitch,yaw = self.matrix_to_xyzrpy(T)
+        print('real_ros  :', self.p)
+        print('calculated:',x_,y_,z_,roll,pitch,yaw)
         H_current = self.xyzrpy_to_matrix(self.p[0], self.p[1], self.p[2], self.p[3], self.p[4], self.p[5])  # 현재 위치 변환 행렬 (4x4)
         H_desired = self.xyzrpy_to_matrix(self.p_desired[0], self.p_desired[1], self.p_desired[2], self.p_desired[3], self.p_desired[4], self.p_desired[5])  # 목표 위치 변환 행렬 (4x4)
 
@@ -188,8 +236,8 @@ class QP_UR5e(Node):
         q_dot_msg = Float64MultiArray()
         q_dot_msg.data = q_dot.tolist()
         # self.q_dot_pub.publish(q_dot_msg)
-        print("Optimal base velocity:", v_base)
-        print("Optimal joint velocity:", q_dot)
+        # print("Optimal base velocity:", v_base)
+        # print("Optimal joint velocity:", q_dot)
 
 def main(args=None):
     rclpy.init(args=args)

@@ -8,8 +8,10 @@ class Jacobian():
         j = np.array([float(j1_r), float(j2_r)+1.5707963267948966, float(j3_r), float(j4_r)-1.5707963267948966, float(j5_r), float(j6_r)])
 
         # UR5e DH parameters
-        a = np.array([0., 0.425, 0.392, 0., 0., 0.])
-        d = np.array([0.,0.,0.,0.133,0.100,0.])
+        # a = np.array([0., 0.425, 0.392, 0., 0., 0.])
+        # d = np.array([0.,0.,0.,0.133,0.100,0.])
+        a = np.array([0., -0.425, -0.392, 0., 0., 0.])
+        d = np.array([0.163,0.,0.,0.133,0.100,0.1])
         # d = np.array([0.1625, 0., 0., 0.1333, 0.0997, 0.0996])
 
         alpha = np.array([np.pi/2, 0., 0., np.pi/2, -np.pi/2, 0.])
