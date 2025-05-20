@@ -69,6 +69,8 @@ class QP_UR5e(Node):
         # TCP 위치 업데이트
         position = msg.pose.position
         orientation = msg.pose.orientation
+        print("position:", position)
+        print("orientation:", orientation)
         r = R.from_quat([orientation.x, orientation.y, orientation.z, orientation.w])
         euler = r.as_euler('xyz', degrees=False)  # roll, pitch, yaw
         self.p = [position.x, position.y, position.z, euler[0], euler[1], euler[2]]  # [x, y, z, roll, pitch, yaw]

@@ -198,19 +198,19 @@ class QP_UR5e(Node):
 
         # 5. 목적함수
         s = cp.Variable(6)
-        objective = cp.Minimize(0.5 * cp.quad_form(x, Q) + C.T @ x + 2 * cp.sum_squares(x) + 1000 * cp.sum_squares(s)) 
+        objective = cp.Minimize(0.5 * cp.quad_form(x, Q) + C.T @ x + 1000 * cp.sum_squares(x) + 1000 * cp.sum_squares(s)) 
         # 예시 제약조건 (속도 제한 등)
         constraints = [
             x >= -1.0,
             x <= 1.0,
-            # cp.abs(s) <= 0.1,  # 슬랙이 너무 커지는 걸 방지 (선택 사항)
+            cp.abs(s) <= 0.01,  # 슬랙이 너무 커지는 걸 방지 (선택 사항)
             A @ x <= B,  # 예시 제약조건 (속도 제한 등)
             J_ @ x + s == v_desired,  # 엔드이펙터 속도 추종
         ]
 
         # 풀기
         prob = cp.Problem(objective, constraints)
-        prob.solve(solver=cp.OSQP)
+        prob.solve(solver=cp.ECOS)
 
         # 결과
         x_opt = x.value
