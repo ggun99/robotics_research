@@ -20,15 +20,15 @@ class QP_UR5e(Node):
         self.beta = 1
         self.n_dof = 8  # base(2) + arm(6)
         self.k_e = 0.5
-        self.rho_i = 0.9  # influence distance
-        self.rho_s = 0.1  # safety factor
+        self.rho_i = 0.872665  # influence distance
+        self.rho_s = 0.03  # safety factor
         self.eta = 1
         self.q = []
         self.p = []
         self.slack = np.array([0.01, 0.01, 0.01, 0.01, 0.01, 0.01])  # 슬랙 변수 (예시)
         self.p_desired = np.array([-0.48, -0.1338, 0.4878, 1.571, -0.0, -1.57])
         # Hessian matrix의 translational component 생성
-        self.H = np.zeros((6, 3, 6))  # Hessian 행렬 초기화
+        self.H_trans = np.zeros((6, 3, 6))  # Hessian 행렬 초기화
         self.q_initialized = False
         self.p_initialized = False
         self.joint_limits_lower = np.array([0.0, 0.0, -3.14, -3.14, -3.14, -3.14, -3.14, -3.14])  # 하한
@@ -126,15 +126,6 @@ class QP_UR5e(Node):
         J_base = np.zeros((6, 2))  # 베이스 자코비안 (예시)
         J = np.hstack((J_base, J_arm))  # 6x8 자코비안 행렬
 
-        for i in range(6):
-            for j in range(6):
-                a, b = min(i, j), max(i, j)  # 작은 값이 a, 큰 값이 b
-                self.H[i, :, j] = np.cross(J_arm_w[:, a], J_arm_v[:, b]) # 외적 계산
-        # manipulability
-        # m = J_arm_v @ J_arm_v.T 
-        # m_det = np.linalg.det(m)  
-        # m_t = np.sqrt(m_det)  # manipulability (sqrt(det(J * J^T)))
-
         # ====== QP 구성 ======
         x = cp.Variable(self.n_dof+6)  # joint velocity (n+6)
         # euqlidian distance
@@ -148,12 +139,12 @@ class QP_UR5e(Node):
         Q_2 = np.hstack((np.zeros((6,self.n_dof)), 1/e*np.eye(6))) 
 
         Q = np.vstack((Q_1, Q_2))  # QP 행렬 (예시)
-        Q *= 3
+        Q *= 1000
 
         for i in range(6):
             for j in range(6):
                 a, b = min(i, j), max(i, j)  # 작은 값이 a, 큰 값이 b
-                self.H[i, :, j] = np.cross(J_arm_w[:, a], J_arm_v[:, b]) # 외적 계산
+                self.H_trans[i, :, j] = np.cross(J_arm_w[:, a], J_arm_v[:, b]) # 외적 계산
 
         # manipulability
         m = J_arm_v @ J_arm_v.T 
@@ -163,12 +154,12 @@ class QP_UR5e(Node):
         # A = ((J_arm_v @ self.H[0, :, :].T).reshape(-1, order='F')).T
         JJ_inv = np.linalg.pinv((J_arm_v @ J_arm_v.T)).reshape(-1, order='F')
 
-        J_m_T = np.array([[m_t*((J_arm_v @ self.H[0, :, :].T).reshape(-1, order='F')).T @ JJ_inv],
-                        [m_t*((J_arm_v @ self.H[1, :, :].T).reshape(-1, order='F')).T @ JJ_inv],
-                        [m_t*((J_arm_v @ self.H[2, :, :].T).reshape(-1, order='F')).T @ JJ_inv],
-                        [m_t*((J_arm_v @ self.H[3, :, :].T).reshape(-1, order='F')).T @ JJ_inv],
-                        [m_t*((J_arm_v @ self.H[4, :, :].T).reshape(-1, order='F')).T @ JJ_inv],
-                        [m_t*((J_arm_v @ self.H[5, :, :].T).reshape(-1, order='F')).T @ JJ_inv]])
+        J_m_T = np.array([[m_t*((J_arm_v @ self.H_trans[0, :, :].T).reshape(-1, order='F')).T @ JJ_inv],
+                        [m_t*((J_arm_v @ self.H_trans[1, :, :].T).reshape(-1, order='F')).T @ JJ_inv],
+                        [m_t*((J_arm_v @ self.H_trans[2, :, :].T).reshape(-1, order='F')).T @ JJ_inv],
+                        [m_t*((J_arm_v @ self.H_trans[3, :, :].T).reshape(-1, order='F')).T @ JJ_inv],
+                        [m_t*((J_arm_v @ self.H_trans[4, :, :].T).reshape(-1, order='F')).T @ JJ_inv],
+                        [m_t*((J_arm_v @ self.H_trans[5, :, :].T).reshape(-1, order='F')).T @ JJ_inv]])
 
         J_m_hat = np.vstack((np.zeros((2,1)), J_m_T))
         J_ = np.hstack((J, np.eye(6)))  # J_ 행렬 (예시)
@@ -179,8 +170,8 @@ class QP_UR5e(Node):
         C = np.vstack(((J_m_hat+epsilon), np.zeros((6, 1))))
 
         # 현재 조인트 상태와 joint limit 비교
-        rho = np.minimum(self.q - self.joint_limits_lower, self.joint_limits_upper - self.q)
-        A = np.ones(shape=(self.n_dof,self.n_dof+6), dtype=np.float16)  # 예시용 제약조건 행렬
+        rho = np.minimum(np.abs(self.q - self.joint_limits_lower), np.abs(self.joint_limits_upper - self.q))
+        A = np.eye(shape=(self.n_dof,self.n_dof+6))  # 예시용 제약조건 행렬
         B = np.array([0., 0., 
                       self.eta * (rho[2]-self.rho_s)/(self.rho_i-self.rho_s), 
                       self.eta * (rho[3]-self.rho_s)/(self.rho_i-self.rho_s), 
@@ -189,12 +180,12 @@ class QP_UR5e(Node):
                       self.eta * (rho[6]-self.rho_s)/(self.rho_i-self.rho_s), 
                       self.eta * (rho[7]-self.rho_s)/(self.rho_i-self.rho_s)])  # 예시용 제약조건 벡터
         # print("B:", B)
-        T_ = np.linalg.inv(H_current) @ H_desired  # 변환 행렬 (4x4)
+        T_ = np.linalg.pinv(H_current) @ H_desired  # 변환 행렬 (4x4)
         # print("T_:", T_)
         v_desired_star = self.beta * self.matrix_to_xyzrpy(T_)
-        print("v_desired_star:", v_desired_star)
+        # print("v_desired_star:", v_desired_star)
         v_desired = v_desired_star # - self.slack
-        print("v_desired:", v_desired)
+        # print("v_desired:", v_desired)
 
         # 5. 목적함수
         s = cp.Variable(6)
@@ -203,7 +194,7 @@ class QP_UR5e(Node):
         constraints = [
             x >= -1.0,
             x <= 1.0,
-            cp.abs(s) <= 0.01,  # 슬랙이 너무 커지는 걸 방지 (선택 사항)
+            # cp.abs(s) <= 0.01,  # 슬랙이 너무 커지는 걸 방지 (선택 사항)
             A @ x <= B,  # 예시 제약조건 (속도 제한 등)
             J_ @ x + s == v_desired,  # 엔드이펙터 속도 추종
         ]
@@ -224,13 +215,6 @@ class QP_UR5e(Node):
         print("J_ @ x_opt:", J_ @ x_opt)
         print("v_desired:", v_desired)
         print("x_opt:", x_opt)
-        # print("Problem status:", prob.status)
-        # print("A shape:", A.shape)
-        # print("B shape:", B.shape)
-        # print("J_ shape:", J_.shape)
-        # print("v_desired shape:", v_desired.shape)
-        # print("QP solution:", x_opt)
-        # print("v_desired:", v_desired)
         v_base = x_opt[:2]
         q_dot = x_opt[2:8]
         # 결과를 퍼블리시
