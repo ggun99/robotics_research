@@ -64,7 +64,7 @@ class QP_UR5e(Node):
             H_desired = T
             H_desired.A[:3, :3] = T.A[:3, :3]  # 현재 회전 행렬 유지
             H_desired.A[0, -1] -= 0.25
-            H_desired.A[2, -1] += 0.125
+            H_desired.A[2, -1] -= 0.05
             self.H_desired = H_desired
         else:
             H_desired = self.H_desired
@@ -127,7 +127,8 @@ class QP_UR5e(Node):
         # The lower and upper bounds on the joint velocity and slack variable
         lb = -np.r_[self.robot.qdlim[: self.n_dof], 10 * np.ones(6)]
         ub = np.r_[self.robot.qdlim[: self.n_dof], 10 * np.ones(6)]
-
+        # print('Ain', Ain)
+        # print('bin', bin)
         # Solve for the joint velocities dq
         qd = qp.solve_qp(Q, c, Ain, bin, Aeq, beq, lb=lb, ub=ub, solver="quadprog")
         qd = qd[: self.n_dof]

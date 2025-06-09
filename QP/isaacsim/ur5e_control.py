@@ -22,6 +22,7 @@ import numpy as np
 world = World(stage_units_in_meters=1.0)
 scene = world.scene
 assets_root_path = get_assets_root_path()
+print("Assets root path: ", assets_root_path)
 
 # use Isaac Sim provided asset
 robot_asset_path = assets_root_path + "/Isaac/Robots/UniversalRobots/ur5e/ur5e.usd"
@@ -47,7 +48,7 @@ world.scene.add_default_ground_plane()
 world.reset()
 joints_default_positions = my_ur5.get_joint_positions()
 arm_joint_indices = np.array([0, 1, 2, 3, 4, 5])
-articulation_controller = my_ur5.get_articulation_controller()
+# articulation_controller = my_ur5.set_joint_velocities()
 
 i = 0
 while simulation_app.is_running():
@@ -56,14 +57,20 @@ while simulation_app.is_running():
         if world.current_time_step_index == 0:
             world.reset()
         i += 1
-        joints_default_positions[1] = -np.pi/2
-        joints_default_positions[2] = np.sin(i/100) * 0.628
-        arm_values = joints_default_positions[arm_joint_indices]
-        print(f"==>> joints_default_positions: {joints_default_positions}")
-        print(f"==>> arm_values: {arm_values}")
-        actions = ArticulationAction(joint_positions=arm_values, joint_indices=arm_joint_indices)
-        print(f"==>> actions: {actions}")
+
+        # 예시: 2번, 3번 조인트에 속도 부여
+        joint_velocities = np.zeros_like(joints_default_positions)
+        joint_velocities[1] = 0.5  # 2번 조인트 속도(rad/s)
+        joint_velocities[2] = np.sin(i/100)  # 3번 조인트 속도(rad/s)
+
+        # arm_joint_indices에 해당하는 속도만 추출
+        # arm_velocities = joint_velocities[arm_joint_indices]
+        my_ur5.set_joint_velocities(velocities = joint_velocities, indices=arm_joint_indices)
+        # actions = ArticulationAction(
+        #     joint_velocities=arm_velocities,
+        #     joint_indices=arm_joint_indices
+        # )
         articulation_controller.apply_action(actions)
-        print("full: ", my_ur5.get_joint_positions())
         print("joints : ", my_ur5.get_joint_positions())
+
 simulation_app.close()

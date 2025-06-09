@@ -65,6 +65,7 @@ class QP_UR5e(Node):
         self.q = np.vstack(( np.zeros((2,1)), self.q.reshape(-1,1)))  # 베이스 조인트 추가 (예시)
         self.q_initialized = True
         self.q = self.q.ravel() 
+        self.robot.q = self.q[2:]  # 로봇 모델에 조인트 각도 설정
         # self.q_dot = msg.velocity
 
     def dh_transform(self, a, alpha, d, theta):
@@ -188,10 +189,10 @@ class QP_UR5e(Node):
         if not self.q_initialized:
             print("Waiting for joint states and TCP position...")
             return
-        print(self.q)
+        # print(self.q)
         # T = self.ur5e_forward_kinematics(self.q[2:8])  # UR5e FK 계산
         T = self.robot.fkine(self.q[2:8])  # UR5e FK 계산
-        print("T:", T)
+        # print("T:", T)
         H_current = SE3(T) 
         if self.H_desired is None:
             H_desired = SE3(T)
@@ -218,7 +219,9 @@ class QP_UR5e(Node):
         x = cp.Variable(self.n_dof+6)  # joint velocity (n+6)
         # euqlidian distance
         print("H_current:", H_current.A)
-        print("H_desired:", H_desired.A)
+        bTe = self.robot.fkine(self.robot.q, include_base=False).A
+        print("bTe:", bTe)
+        # print("H_desired:", H_desired.A)
         T_error = np.linalg.inv(H_current.A) @ H_desired.A  # 4x4
 
         et = np.sum(np.abs(T_error[:3, -1])) + np.exp(-16)  # Euclidean distance (예시)
@@ -303,8 +306,8 @@ class QP_UR5e(Node):
         q_dot_msg = Float64MultiArray()
         q_dot_msg.data = q_dot.tolist()
         self.q_dot_pub.publish(q_dot_msg)
-        print("Optimal base velocity:", v_base)
-        print("Optimal joint velocity:", q_dot)
+        # print("Optimal base velocity:", v_base)
+        # print("Optimal joint velocity:", q_dot)
 
 def main(args=None):
     rclpy.init(args=args)
