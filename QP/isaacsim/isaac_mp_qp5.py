@@ -224,7 +224,7 @@ while simulation_app.is_running():
             T_b0[2,3] = 0.51921  # 0.47921
             T_0e = ur5e_robot.fkine(q[2:]).A
 
-            T = T_b0 @ T_0e  # 베이스 프레임 기준 end-effector 위치
+            T = T_sb @ T_b0 @ T_0e  # 베이스 프레임 기준 end-effector 위치
             H_current = SE3(T)  # 현재 end-effector 위치
 
             if H_desired is None:
@@ -244,7 +244,12 @@ while simulation_app.is_running():
             lx = 0.1015
             X_e = T[0, 3]  # x position
             Y_e = T[1, 3]  # y position
-        
+            # F = np.array([[np.cos(yaw), 0.0],
+            #                 [np.sin(yaw), 0.0],
+            #                 [        0.0, 0.0],
+            #                 [        0.0, 0.0], 
+            #                 [        0.0, 0.0],
+            #                 [        0.0, 1.0]])
             F = np.array([[0.0, np.cos(yaw)],
                             [0.0, np.sin(yaw)],
                             [0.0, 0.0],
@@ -259,7 +264,7 @@ while simulation_app.is_running():
             # J_mb_w = J_mb[3:, :]  # 3x8 자코비안 (각속도)
             
 
-            J_p = base.tr2jac(T.T) #@ F  # 6x2 자코비안 (선형 속도)
+            J_p = base.tr2jac(T.T) @ F  # 6x2 자코비안 (선형 속도)
             J_a_e = ur5e_robot.jacobe(q[2:])
             J_mb = np.hstack((J_p, J_a_e))  # 6x8 자코비안 (선형 속도 + 각속도)
             J_mb_v = J_mb[:3, :]  # 3x8 자코비안 (선형 속도)

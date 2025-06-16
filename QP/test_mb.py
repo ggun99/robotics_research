@@ -19,7 +19,6 @@ class QP_UR5e(Node):
     def __init__(self):
         super().__init__('QP_UR5e')
         self.ROBOT_IP = '192.168.0.3'
-        self.Jacobian = Jacobian()
         self.robot = rtb.models.UR5()
         # self.k_a = 0.01
         # self.beta = 1
