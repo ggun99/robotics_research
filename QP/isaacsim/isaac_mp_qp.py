@@ -96,7 +96,7 @@ ax.axhline(y=0.02, color='purple', linestyle='--', label="Threshold (0.02)")
 ax.set_xlim(0, 100)  # 초기 x축 범위
 ax.set_ylim(0, 1)    # 초기 y축 범위
 ax.set_xlabel("Simulation Time (s)")
-ax.set_ylabel("Error")
+ax.set_ylabel("Error(m)")
 ax.set_title("Error Reduction Over Time")
 ax.legend()
 ax.grid()
@@ -137,7 +137,7 @@ world.reset()
 my_robot = Articulation(prim_path)
 my_robot.initialize()
 
-aljnu_indices = aljnu_body_indices[4:] #aljnu_joint_indices[4:]  
+aljnu_indices = aljnu_body_indices[5:] #aljnu_joint_indices[4:]  
 values = np.ones((1, len(aljnu_indices)), dtype=bool)  
 my_robot.set_body_disable_gravity(values, indices=[0], body_indices=aljnu_indices) 
 
@@ -178,26 +178,21 @@ while simulation_app.is_running():
         if world.current_time_step_index == 0:
             world.reset()
             reached_default = False  # 시뮬 초기화 시 플래그도 초기화
-
         current_joint_positions = my_robot.get_joint_positions()[0][aljnu_joint_indices]
         mobile_base_pose, mobile_base_quat = my_robot.get_world_poses(indices = [0])
         x = mobile_base_pose[0][0]
         y = mobile_base_pose[0][1] 
         z = mobile_base_pose[0][2] 
-        dx = x - x0
-        dy = y - y0
-        
+
         quat = mobile_base_quat[0]
         r = R.from_quat([quat[1], quat[2], quat[3], quat[0]])
         euler = r.as_euler('zyx', degrees=False)  # 'zyx' 순서로 euler angles 추출
-        yaw = euler[0]  
-        # 초기 heading(θ0) 기준으로 전진 거리
-        forward = dx * np.cos(yaw) + dy * np.sin(yaw)
-        q = np.zeros(8)
-        q[0] = yaw  
-        q[1] = forward  
-        q[2:] = current_joint_positions[4:10]  # UR5e 조인트 위치
 
+        q = np.zeros(8)
+        q[0] = 0.0
+        q[1] = 0.0 
+        q[2:] = current_joint_positions[4:10]  # UR5e 조인트 위치
+        
         if  not reached_default:
             # 1단계: default position으로 이동
             actions = ArticulationActions(
@@ -212,6 +207,7 @@ while simulation_app.is_running():
                 my_robot.switch_control_mode("velocity")
                 print("Reached default position!")
         else:
+
             sb_rot = r.as_matrix()
             T_sb = np.eye(4)
             T_sb[0,3] = x
@@ -227,40 +223,32 @@ while simulation_app.is_running():
             T = T_b0 @ T_0e  # 베이스 프레임 기준 end-effector 위치
             H_current = SE3(T)  # 현재 end-effector 위치
 
-            if H_desired is None:
-                H_desired = H_current
-                H_desired = SE3(H_current.A.copy())  # 현재 위치를 복사하여 새로 생성
-                H_desired.A[0, -1] -= 0.8
-                H_desired.A[1, -1] -= 1.5
-                H_desired.A[2, -1] -= 0.4
-                print('desired: \\', H_desired)
-                print('current: \\', SE3(T))
-            else:
-                H_desired = H_desired
-                print('desired: \\', H_desired)
-                print('current: \\', SE3(T))
+            T_sd = np.eye(4)
+            T_sd[0, 3] = - 0.85 
+            T_sd[1, 3] = 0.12
+            T_sd[2, 3] = 0.97
 
-            # 전체 자코비안 J (6x8)
-            lx = 0.1015
-            X_e = T[0, 3]  # x position
-            Y_e = T[1, 3]  # y position
-        
-            F = np.array([[0.0, np.cos(yaw)],
-                            [0.0, np.sin(yaw)],
+            T_bd = np.linalg.inv(T_sb) @ T_sd  
+
+            H_desired = SE3(T_bd)  # 목표 end-effector 위치 
+            print('H_current: ', H_current)
+            print('H_desired: ', H_desired)
+            print('T_sd: ', T_sd)
+            print('T_sd_cal: ', T_sb @ T_b0 @ T_0e)
+            # lx = 0.1015
+            # X_e = T[0, 3]  # x position
+            # Y_e = T[1, 3]  # y position
+
+            F = np.array([[0.0, 1.0],
+                            [0.0, 0.0],
                             [0.0, 0.0],
                             [0.0, 0.0], 
                             [0.0, 0.0],
                             [1.0, 0.0]])
-            # T_eval = ur5e_robot.fkine(q[2:]).A
-            # J_p = base.tr2jac(T .T) @ F  # 6x2 자코비안 (선형 속도)
-            # J_a_e = ur5e_robot.jacobe(q[2:])
-            # J_mb = np.hstack((J_p, J_a_e))  # 6x8 자코비안 (선형 속도 + 각속도)
-            # J_mb_v = J_mb[:3, :]  # 3x8 자코비안 (선형 속도)
-            # J_mb_w = J_mb[3:, :]  # 3x8 자코비안 (각속도)
             
 
-            J_p = base.tr2jac(T.T) #@ F  # 6x2 자코비안 (선형 속도)
-            J_a_e = ur5e_robot.jacobe(q[2:])
+            J_p = base.tr2adjoint(T.T) @ F  # 6x2 자코비안 (선형 속도)
+            J_a_e = base.tr2adjoint(T.T) @ ur5e_robot.jacob0(q[2:])
             J_mb = np.hstack((J_p, J_a_e))  # 6x8 자코비안 (선형 속도 + 각속도)
             J_mb_v = J_mb[:3, :]  # 3x8 자코비안 (선형 속도)
             J_mb_w = J_mb[3:, :]  # 3x8 자코비안 (각속도)
@@ -351,16 +339,16 @@ while simulation_app.is_running():
                 qd = np.array([0.,0.,0.0,0.0,0.,0.,0.,0.]) 
 
             if et > 0.5:
-                qd *= 0.7 / et
+                qd = qd
             else:
                 qd *= 1.4
-
+                print("et:", et)
             if et < 0.02:
                 print("Reached desired position!")
                 qd *= 0.0 # 목표 위치에 도달했음을 나타냄
 
                  # 그래프 저장
-                plt.savefig("error_reduction_graph_x,y,z.png")
+                plt.savefig("error_reduction_graph_x_2.png")
                 print("Graph saved as 'error_reduction_graph.png'")
 
                 # 시뮬레이션 종료
@@ -404,7 +392,7 @@ while simulation_app.is_running():
 
 
             wc, vc = qd[0], qd[1]  # 베이스 속도
-            wc *= 2.0
+            wc *= 10.0
 
             r_m = 0.165
             l_m = 0.582
