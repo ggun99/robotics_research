@@ -137,7 +137,7 @@ world.reset()
 my_robot = Articulation(prim_path)
 my_robot.initialize()
 
-aljnu_indices = aljnu_body_indices[4:] #aljnu_joint_indices[4:]  
+aljnu_indices = aljnu_body_indices[5:] #aljnu_joint_indices[4:]  
 values = np.ones((1, len(aljnu_indices)), dtype=bool)  
 my_robot.set_body_disable_gravity(values, indices=[0], body_indices=aljnu_indices) 
 
@@ -158,19 +158,6 @@ mobile_base_pose, mobile_base_quat = my_robot.get_world_poses(indices = [0])
 x0 = mobile_base_pose[0][0]
 y0 = mobile_base_pose[0][1]
 H_desired = None
-
-
-# front_left_wheel_prim_path = "/World/aljnu_mp/front_left_wheel_link"
-# front_right_wheel_prim_path = "/World/aljnu_mp/front_right_wheel_link"
-# rear_left_wheel_prim_path = "/World/aljnu_mp/rear_left_wheel_link"
-# rear_right_wheel_prim_path = "/World/aljnu_mp/rear_right_wheel_link"
-# # 마찰 계수 설정
-# static_friction = 0.01
-# dynamic_friction = 0.01
-# PhysicsMaterial(prim_path=front_left_wheel_prim_path,  dynamic_friction=dynamic_friction)
-# PhysicsMaterial(prim_path=front_right_wheel_prim_path,  dynamic_friction=dynamic_friction)
-# PhysicsMaterial(prim_path=rear_left_wheel_prim_path,  dynamic_friction=dynamic_friction)
-# PhysicsMaterial(prim_path=rear_right_wheel_prim_path,  dynamic_friction=dynamic_friction)
 
 while simulation_app.is_running():
     world.step(render=True)

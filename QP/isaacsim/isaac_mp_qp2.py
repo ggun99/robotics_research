@@ -181,13 +181,20 @@ while simulation_app.is_running():
             target_link_prim_path = "/World/aljnu_mp/ur5e_wrist_3_link"
             prim = XFormPrim(target_link_prim_path)
             ur5e_last_link_pose, ur5e_last_link_quat = prim.get_world_poses()
+            print('ur5e last link pose:', ur5e_last_link_pose)
+            print('ur5e last link quat:', ur5e_last_link_quat)
             # quat_ur = mobile_base_quat[0]
             # print('quat_ur', quat_ur)
             # r_ur = R.from_quat([quat_ur[1], quat_ur[2], quat_ur[3], quat_ur[0]])
             # euler_ur = r_ur.as_euler('xyz', degrees=True)  # 'xyz' 순서로 euler angles 추출
             # print('euler_ur', euler_ur)
             
-            
+            # possse, orieen = my_robot.get_world_poses()  # mobile base의 월드 포즈 가져오기
+            # print('mobile base pose:', possse)
+            # print('mobile base quat:', orieen)
+            # local_pose, local_orient = my_robot.get_local_poses()
+            # print('mobile base local pose:', local_pose)
+            # print('mobile base local quat:', local_orient)
 
             quat_ur = ur5e_last_link_quat[0]
             # 정규화
@@ -217,8 +224,8 @@ while simulation_app.is_running():
                 H_desired = H_desired
             else:
                 H_desired = H_desired
-                print('desired: ', H_desired)
-                print('current: ', SE3(T))
+                # print('desired: ', H_desired)
+                # print('current: ', SE3(T))
 
             # # 전체 자코비안 J (6x9)
             # J_arm = robot.jacobe(q[2:8])
@@ -339,12 +346,14 @@ while simulation_app.is_running():
             # current_velocity = np.array(my_robot.get_joint_velocities()).reshape(-1)
             # print("current_velocity: ", current_velocity)
             # print("changed current_velocity: ", joint_velocities)
-            my_robot.switch_control_mode("velocity")
-            actions = ArticulationActions(
-                joint_velocities=joint_velocities,
-                joint_indices=aljnu_joint_indices
-            )
-            my_robot.apply_action(actions)
+
+
+            # my_robot.switch_control_mode("velocity")
+            # actions = ArticulationActions(
+            #     joint_velocities=joint_velocities,
+            #     joint_indices=aljnu_joint_indices
+            # )
+            # my_robot.apply_action(actions)
 
         # print("joints : ", my_robot.get_joint_positions())
 

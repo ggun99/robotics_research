@@ -8,14 +8,15 @@ simulation_app = SimulationApp({"headless": False})
 
 from isaacsim.core.utils.nucleus import get_assets_root_path
 # from omni.isaac.core.utils.stage import update_stage
-from isaacsim.core.api import World
+from isaacsim.core.api import World, SimulationContext
+from isaacsim.core.api.objects import DynamicCylinder
 # from isaacsim.core.api.materials import PhysicsMaterial
 # from isaacsim.cortex.framework.robot import CortexUr10
 from isaacsim.robot.manipulators.grippers import ParallelGripper
 from isaacsim.core.utils.stage import add_reference_to_stage
 from isaacsim.core.prims import Articulation, XFormPrim
 from isaacsim.core.utils.types import ArticulationActions
-from pxr import UsdGeom
+from pxr import UsdGeom, Gf
 
 import numpy as np
 from scipy.spatial.transform import Rotation as R
@@ -24,6 +25,7 @@ import qpsolvers as qp
 from spatialmath import base, SE3
 import roboticstoolbox as rtb
 import matplotlib.pyplot as plt
+
 
 def joint_velocity_damper(
         ps: float = 0.05,
@@ -74,6 +76,35 @@ def joint_velocity_damper(
 
         return Ain, Bin
 
+def get_nearest_obstacle_distance(position, obstacles):
+    """
+    Calculate the distance to the nearest obstacle from a given position.
+    
+    Args:
+        position (np.ndarray): The position from which to calculate the distance.
+        obstacles (list): A list of obstacle positions.
+        
+    Returns:
+        float: The distance to the nearest obstacle.
+        index (int): The index of the nearest obstacle.
+    """
+    for obs in obstacles:
+        obs[2] = position[2]  # Set the z-coordinate of the obstacle to the specified value
+    distances = [np.linalg.norm(position - obs) for obs in obstacles]
+    index = np.argmin(distances)
+    x = position[0] - obstacles[index][0]
+    y = position[1] - obstacles[index][1]
+    z = position[2] - obstacles[index][2]
+    x_norm = x / np.linalg.norm([x, y, z]) if np.linalg.norm([x, y, z]) != 0 else 0
+    y_norm = y / np.linalg.norm([x, y, z]) if np.linalg.norm([x, y, z]) != 0 else 0
+    z_norm = z / np.linalg.norm([x, y, z]) if np.linalg.norm([x, y, z]) != 0 else 0
+    # Create a directional vector
+    g_mat = np.zeros(3)  
+    g_mat[0] = x_norm
+    g_mat[1] = y_norm
+    g_mat[2] = z_norm
+
+    return min(distances), index, g_vec
 
 # et 값과 시간을 저장할 리스트
 et_values = []
@@ -133,11 +164,39 @@ qlim = np.array([[-np.inf, -np.inf, -3.14159265, -3.14159265, -3.14159265, -3.14
 world.scene.add_default_ground_plane(z_position=-0.2)  # 바닥면 추가
 world.reset()
 
+# 시뮬레이션 컨텍스트 초기화
+simulation_context = SimulationContext()
+obstacles_positions = np.array([[0.0, 1.0, -0.2], [2.0, 1.0, -0.2], [-1.0, -1.0, -0.2]])
+# 원기둥 생성
+cylinder = DynamicCylinder(
+    prim_path="/World/Xform/Cylinder1",
+    name="cylinder1",
+    position=obstacles_positions[0],
+    radius=0.25,
+    height=2.0,
+    color=np.array([0.8, 0.2, 0.2])
+)
+cylinder = DynamicCylinder(
+    prim_path="/World/Xform/Cylinder2",
+    name="cylinder2",
+    position=obstacles_positions[1],
+    radius=0.25,
+    height=2.0,
+    color=np.array([0.8, 0.2, 0.2])
+)
+cylinder = DynamicCylinder(
+    prim_path="/World/Xform/Cylinder3",
+    name="cylinder3",
+    position=obstacles_positions[2],
+    radius=0.25,
+    height=2.0,
+    color=np.array([0.8, 0.2, 0.2])
+)
 # 2. Articulation 객체로 래핑
 my_robot = Articulation(prim_path)
 my_robot.initialize()
 
-aljnu_indices = aljnu_body_indices[5:] #aljnu_joint_indices[4:]  
+aljnu_indices = aljnu_body_indices[5:]   
 values = np.ones((1, len(aljnu_indices)), dtype=bool)  
 my_robot.set_body_disable_gravity(values, indices=[0], body_indices=aljnu_indices) 
 
@@ -160,22 +219,10 @@ y0 = mobile_base_pose[0][1]
 H_desired = None
 
 
-# front_left_wheel_prim_path = "/World/aljnu_mp/front_left_wheel_link"
-# front_right_wheel_prim_path = "/World/aljnu_mp/front_right_wheel_link"
-# rear_left_wheel_prim_path = "/World/aljnu_mp/rear_left_wheel_link"
-# rear_right_wheel_prim_path = "/World/aljnu_mp/rear_right_wheel_link"
-# # 마찰 계수 설정
-# static_friction = 0.01
-# dynamic_friction = 0.01
-# PhysicsMaterial(prim_path=front_left_wheel_prim_path,  dynamic_friction=dynamic_friction)
-# PhysicsMaterial(prim_path=front_right_wheel_prim_path,  dynamic_friction=dynamic_friction)
-# PhysicsMaterial(prim_path=rear_left_wheel_prim_path,  dynamic_friction=dynamic_friction)
-# PhysicsMaterial(prim_path=rear_right_wheel_prim_path,  dynamic_friction=dynamic_friction)
-
 while simulation_app.is_running():
     world.step(render=True)
     if world.is_playing():
-        if world.current_time_step_index == 0:
+        if world.current_time_step_index == 0:  
             world.reset()
             reached_default = False  # 시뮬 초기화 시 플래그도 초기화
         current_joint_positions = my_robot.get_joint_positions()[0][aljnu_joint_indices]
@@ -207,6 +254,44 @@ while simulation_app.is_running():
                 my_robot.switch_control_mode("velocity")
                 print("Reached default position!")
         else:
+            # mobile base links positions and orientations
+            rear_right_wheel_link = "/World/aljnu_mp/rear_right_wheel_link"
+            prim_rear_right_wheel = XFormPrim(rear_right_wheel_link)
+            rear_right_wheel_pose, rear_right_wheel_quat = prim_rear_right_wheel.get_world_poses()
+            rear_left_wheel_link = "/World/aljnu_mp/rear_left_wheel_link"
+            prim_rear_left_wheel = XFormPrim(rear_left_wheel_link)
+            rear_left_wheel_pose, rear_left_wheel_quat = prim_rear_left_wheel.get_world_poses()
+            front_right_wheel_link = "/World/aljnu_mp/front_right_wheel_link"
+            prim_front_right_wheel = XFormPrim(front_right_wheel_link)
+            front_right_wheel_pose, front_right_wheel_quat = prim_front_right_wheel.get_world_poses()
+            front_left_wheel_link = "/World/aljnu_mp/front_left_wheel_link"
+            prim_front_left_wheel = XFormPrim(front_left_wheel_link)
+            front_left_wheel_pose, front_left_wheel_quat = prim_front_left_wheel.get_world_poses()    
+            # ur5e joint links positions and orientations
+            ur5e_shoulder_link = "/World/aljnu_mp/ur5e_shoulder_link"
+            prim_shoulder = XFormPrim(ur5e_shoulder_link)
+            ur5e_shoulder_pose, ur5e_shoulder_quat = prim_shoulder.get_world_poses()
+            ur5e_upper_arm_link = "/World/aljnu_mp/ur5e_upper_arm_link"
+            prim_upper_arm = XFormPrim(ur5e_upper_arm_link)
+            ur5e_upper_arm_pose, ur5e_upper_arm_quat = prim_upper_arm.get_world_poses()
+            ur5e_forearm_link = "/World/aljnu_mp/ur5e_forearm_link"
+            prim_forearm = XFormPrim(ur5e_forearm_link)
+            ur5e_forearm_pose, ur5e_forearm_quat = prim_forearm.get_world_poses()
+            ur5e_wrist_1_link = "/World/aljnu_mp/ur5e_wrist_1_link"
+            prim_wrist_1 = XFormPrim(ur5e_wrist_1_link)
+            ur5e_wrist_1_pose, ur5e_wrist_1_quat = prim_wrist_1.get_world_poses()
+            ur5e_wrist_2_link = "/World/aljnu_mp/ur5e_wrist_2_link"
+            prim_wrist_2 = XFormPrim(ur5e_wrist_2_link)
+            ur5e_wrist_2_pose, ur5e_wrist_2_quat = prim_wrist_2.get_world_poses()
+            ur5e_wrist_3_link = "/World/aljnu_mp/ur5e_wrist_3_link"
+            prim_wrist_3 = XFormPrim(ur5e_wrist_3_link)
+            ur5e_wrist_3_pose, ur5e_wrist_3_quat = prim_wrist_3.get_world_poses()
+
+            xform_pose = np.array([rear_right_wheel_pose[0], rear_left_wheel_pose[0], front_right_wheel_pose[0], front_left_wheel_pose[0],
+                                ur5e_shoulder_pose[0], ur5e_upper_arm_pose[0], ur5e_forearm_pose[0], ur5e_wrist_1_pose[0], 
+                                ur5e_wrist_2_pose[0], ur5e_wrist_3_pose[0]])
+            # ['base_link', 'front_left_wheel_link', 'front_right_wheel_link', 'rear_left_wheel_link', 'rear_right_wheel_link', 
+            # 'ur5e_shoulder_link', 'ur5e_upper_arm_link', 'ur5e_forearm_link', 'ur5e_wrist_1_link', 'ur5e_wrist_2_link', 'ur5e_wrist_3_link', 
 
             sb_rot = r.as_matrix()
             T_sb = np.eye(4)
@@ -235,9 +320,6 @@ while simulation_app.is_running():
             print('H_desired: ', H_desired)
             print('T_sd: ', T_sd)
             print('T_sd_cal: ', T_sb @ T_b0 @ T_0e)
-            # lx = 0.1015
-            # X_e = T[0, 3]  # x position
-            # Y_e = T[1, 3]  # y position
 
             F = np.array([[0.0, 1.0],
                             [0.0, 0.0],
@@ -246,7 +328,6 @@ while simulation_app.is_running():
                             [0.0, 0.0],
                             [1.0, 0.0]])
             
-
             J_p = base.tr2adjoint(T.T) @ F  # 6x2 자코비안 (선형 속도)
             J_a_e = base.tr2adjoint(T.T) @ ur5e_robot.jacob0(q[2:])
             J_mb = np.hstack((J_p, J_a_e))  # 6x8 자코비안 (선형 속도 + 각속도)
@@ -269,11 +350,9 @@ while simulation_app.is_running():
             Q = np.eye(n_dof + 6)
 
             # Joint velocity component of Q
-            # Q[: n_dof, : n_dof] *= Y
             Q[:2, :2] *= 1.0 / (et*100)
 
             # Slack component of Q
-            # Q[n_dof :, n_dof :] = (1.0 / et) * np.eye(6)
             Q[n_dof :, n_dof :] = (1.0 / et) * np.eye(6)
 
             H = np.zeros((n_dof-2, 6, n_dof-2))  # same as jacobm
@@ -308,6 +387,17 @@ while simulation_app.is_running():
 
             A = np.zeros((n_dof + 6, n_dof + 6))
             B = np.zeros(n_dof + 6)
+
+            for i , pose in enumerate(xform_pose) :
+                distance, index, g_vec = get_nearest_obstacle_distance(pose, obstacles_positions)
+                if i < 4:  # mobile base wheels
+                    d_dot = g_vec @ J_mb_v[:,:2] @ q[:2]
+                    A[i, :2] = d_dot 
+                    A[i, 2:] = np.zeros(n_dof - 2)  # arm joints
+                else:  # UR5e joints
+                    d_dot = g_vec @ J_mb_v[:, :i+1] @ q[:i+1]
+
+            
             A[: n_dof, : n_dof], B[: n_dof] = joint_velocity_damper(ps=rho_s, pi=rho_i, n=n_dof, gain=eta)  # joint velocity damper
     
             J_ = np.c_[J_mb, np.eye(6)]  # J_ 행렬 (예시)
