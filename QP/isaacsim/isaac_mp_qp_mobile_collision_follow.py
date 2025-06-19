@@ -9,7 +9,7 @@ simulation_app = SimulationApp({"headless": False})
 from isaacsim.core.utils.nucleus import get_assets_root_path
 # from omni.isaac.core.utils.stage import update_stage
 from isaacsim.core.api import World, SimulationContext
-from isaacsim.core.api.objects import DynamicCylinder
+from isaacsim.core.api.objects import DynamicCylinder, VisualSphere
 # from isaacsim.core.api.materials import PhysicsMaterial
 # from isaacsim.cortex.framework.robot import CortexUr10
 from isaacsim.robot.manipulators.grippers import ParallelGripper
@@ -206,6 +206,14 @@ cylinder = DynamicCylinder(
     height=obstacle_height,
     color=np.array([0.8, 0.2, 0.2])
 )
+# desired position with sphere
+desired_sphere = VisualSphere(
+    prim_path="/World/Xform/sphere",
+    name="desired_sphere",
+    position=np.array([1.5, 1.5, 1.5]),
+    radius=0.02,
+    color=np.array([0.2, 0.8, 0.2])
+)
 # 2. Articulation 객체로 래핑
 my_robot = Articulation(prim_path)
 my_robot.initialize()
@@ -332,9 +340,9 @@ while simulation_app.is_running():
             T_sd[2, 3] = 0.97
             
             desired_position = np.array([T_sd[0, 3], T_sd[1, 3], T_sd[2, 3]])
+            desired_sphere.set_world_pose(desired_position)
             distances = [np.linalg.norm(desired_position - obs)-obstacle_radius for obs in obstacles_positions]
-            min_distance = np.min(distances)
-            if min_distance < d_safe:
+            if np.min(distances) < d_safe:
                 print("Desired position is too close to an obstacle. Adjusting position.")
                 # Adjust the desired position to be further away from the nearest obstacle
                 nearest_index = np.argmin(distances)
@@ -342,6 +350,7 @@ while simulation_app.is_running():
                 direction_vector /= np.linalg.norm(direction_vector)
 
             T_bd = np.linalg.inv(T_sb) @ T_sd  
+            
 
             H_desired = SE3(T_bd)  # 목표 end-effector 위치 
             print('H_current: ', H_current)
@@ -406,27 +415,26 @@ while simulation_app.is_running():
             for i in range(n_dof-2):
                 c = J_a @ np.transpose(H[i, :, :])  # shape: (6,6)
                 J_m[i,0] = m_t * np.transpose(c.flatten("F")) @ JJ_inv.flatten("F")
+            
+            C = np.concatenate((np.zeros(2), -J_m.reshape((n_dof - 2,)), np.zeros(6)))
+
+            bTe = ur5e_robot.fkine(q[2:], include_base=False).A  
+            θε = atan2(bTe[1, -1], bTe[0, -1])
+            C[0] = - k_e * θε  # 베이스 x 위치 오차
 
             A = np.zeros((n_dof + 6, n_dof + 6))
             B = np.zeros(n_dof + 6)
 
-            J_c = np.zeros(n_dof+6)
-            w_p_sum = 0.0
-            min_dist = 0.0
-
+            
             for i , pose in enumerate(xform_pose) :
                 distance, index, g_vec = get_nearest_obstacle_distance(pose, obstacles_positions, obstacle_radius)
-                min_dist = np.min(distance)
                 if i < 4:  # mobile base wheels
                     jac_mobile = F
                     jac_mobile_v = jac_mobile[:3,:]  # 3x2 자코비안 (선형 속도)
                     d_dot = g_vec @ jac_mobile_v[:,:2] 
                     A[i, :2] = d_dot 
                     A[i, 2:] = np.zeros((1, n_dof - 2 + 6))  # arm joints
-                    B[i] = (distance - d_safe) / (d_influence - d_safe) 
-                    w_p = (d_influence-distance)/(d_influence-d_safe) 
-                    J_c[:6] += A[i, :6] * w_p  # 베이스 조인트 속도에 대한 제약 조건
-                    w_p_sum += w_p
+                    B[i] = (distance - d_safe) / (d_influence - d_safe)  
                 elif 3 < i < 9:  # UR5e joints
                     T_instant = T_b0 @ ur5e_robot.fkine(q[2:2 + i - 4],end = ur5e_robot.links[i - 4]).A
                     jac_mobile = base.tr2adjoint(T_instant.T) @ F
@@ -442,10 +450,6 @@ while simulation_app.is_running():
                     A[i, :i-1] = d_dot
                     A[i, i-1:] = np.zeros((1, n_dof - (i-1) + 6))  # arm joints
                     B[i] = (distance - d_safe) / (d_influence - d_safe)
-                    w_p = (d_influence-distance)/(d_influence-d_safe) 
-                    J_c[:6] += A[i, :6] * w_p  # 베이스 조인트 속도에 대한 제약 조건
-                    w_p_sum += w_p
-
                 else:
                     T_instant = T_b0 @ ur5e_robot.fkine(q[2:2 + i - 4],end = ur5e_robot.links[i - 4]).A
                     jac_mobile = base.tr2adjoint(T_instant.T) @ F
@@ -461,20 +465,8 @@ while simulation_app.is_running():
                     A[i, :i-1] = d_dot
                     A[i, i-1:] = np.zeros((1, n_dof - (i-1) + 6))  # arm joints
                     B[i] = (distance - d_safe) / (d_influence - d_safe)
-                    w_p = (d_influence-distance)/(d_influence-d_safe) 
-                    J_c[:6] += A[i, :6] * w_p  # 베이스 조인트 속도에 대한 제약 조건
-                    w_p_sum += w_p
 
-
-            C = np.concatenate((np.zeros(2), -J_m.reshape((n_dof - 2,)), np.zeros(6)))
-            lambda_max = 1.5
-            lambda_c = (lambda_max /(d_influence - d_safe)**2) * (min_dist - d_influence)**2
-            C += (lambda_c * J_c/w_p_sum)  # 베이스 조인트 속도에 대한 제약 조건 추가
-
-            bTe = ur5e_robot.fkine(q[2:], include_base=False).A  
-            θε = atan2(bTe[1, -1], bTe[0, -1])
-            C[0] = - k_e * θε  # 베이스 x 위치 오차
-
+            
             # A[: n_dof, : n_dof], B[: n_dof] = joint_velocity_damper(ps=rho_s, pi=rho_i, n=n_dof, gain=eta)  # joint velocity damper
     
             J_ = np.c_[J_mb, np.eye(6)]  # J_ 행렬 (예시)
@@ -508,7 +500,7 @@ while simulation_app.is_running():
             if et > 0.5:
                 qd = qd
             else:
-                qd *= 0.5
+                qd *= 1.4
                 print("et:", et)
             if et < 0.02:
                 print("Reached desired position!")
