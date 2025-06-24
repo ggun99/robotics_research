@@ -276,6 +276,10 @@ start_t = None  # 현재 시간
 human_desired_position = np.array([-1.5, -1.0, 0.97])  # 목표 위치
 T_robot = None  # 로봇의 현재 위치를 저장할 변수
 
+# 마지막 업데이트 시간을 저장할 변수
+last_update_time = None
+update_interval = 0.05  # 업데이트 간격 (초)
+
 while simulation_app.is_running():
     world.step(render=True)
     if world.is_playing():
@@ -362,29 +366,56 @@ while simulation_app.is_running():
             # T_b0[1,3] = 
             T_b0[2,3] = 0.51921  # 0.47921
             T_0e = ur5e_robot.fkine(q[2:]).A
-
+            print("T: ", T_sb @ T_b0 @ T_0e)
             T = T_b0 @ T_0e  # 베이스 프레임 기준 end-effector 위치
             H_current = SE3(T)  # 현재 end-effector 위치
             if T_robot is None:
                 T_robot = T
                 desired_sphere.set_world_pose(T_robot[:3, 3])  # 초기 desired position 설정
             if start_t is None:
-                start_t = world.current_time   
-            taken_t = world.current_time - start_t
-            cur_p = human_sphere.get_world_pose()[0]
-            human_error = human_desired_position - cur_p
-            go_p = cur_p + (human_error * taken_t / moving_t)  # 이동 시간 동안 목표 위치로 이동
-            human_sphere.set_world_pose(go_p)  # 인간 위치 업데이트
+                start_t = world.current_time
+            # print("start_t: ", start_t)
+            # print("taken_t: ", world.current_time - start_t)
+            # print("current_time: ", world.current_time)
+            # print("moving_t: ", moving_t)
+            # taken_t = world.current_time - start_t
+            # cur_p = human_sphere.get_world_pose()[0]
+            # print("human error",(human_desired_position - cur_p) * taken_t / moving_t)   
+            # human_error = human_desired_position - cur_p
+            # go_p = cur_p + (human_error * taken_t / moving_t)  # 이동 시간 동안 목표 위치로 이동
+            # print("go_p: ", go_p)
+            # human_sphere.set_world_pose(go_p)  # 인간 위치 업데이트
 
-            cur_dp = desired_sphere.get_world_pose()[0]
-            # 목표 end-effector 위치 설정
-            T_sd = np.eye(4)
-            T_sd[0, 3] = cur_dp[0] + human_error[0] * taken_t / moving_t # 목표 x 위치
-            T_sd[1, 3] = cur_dp[1] + human_error[1] * taken_t / moving_t # 목표 y 위치
-            T_sd[2, 3] = cur_dp[2] + human_error[2] * taken_t / moving_t # 목표 z 위치
+            # cur_dp = desired_sphere.get_world_pose()[0]
+            # # 목표 end-effector 위치 설정
+            # T_sd = np.eye(4)
+            # T_sd[0, 3] = cur_dp[0] + human_error[0] * taken_t / moving_t # 목표 x 위치
+            # T_sd[1, 3] = cur_dp[1] + human_error[1] * taken_t / moving_t # 목표 y 위치
+            # T_sd[2, 3] = cur_dp[2] + human_error[2] * taken_t / moving_t # 목표 z 위치
             
-            desired_position = np.array([T_sd[0, 3], T_sd[1, 3], T_sd[2, 3]])
-            desired_sphere.set_world_pose(desired_position)
+            # desired_position = np.array([T_sd[0, 3], T_sd[1, 3], T_sd[2, 3]])
+            # desired_sphere.set_world_pose(desired_position)
+            # 업데이트 간격 확인
+            current_time = world.current_time
+            if last_update_time is None or (current_time - last_update_time >= update_interval):
+                # 업데이트 수행
+                taken_t = current_time - start_t
+                cur_p = human_sphere.get_world_pose()[0]
+                human_error = human_desired_position - cur_p
+                go_p = cur_p + (human_error * taken_t / moving_t)  # 이동 시간 동안 목표 위치로 이동
+                human_sphere.set_world_pose(go_p)  # 인간 위치 업데이트
+
+                cur_dp = desired_sphere.get_world_pose()[0]
+                T_sd = np.eye(4)
+                T_sd[0, 3] = cur_dp[0] + human_error[0] * taken_t / moving_t  # 목표 x 위치
+                T_sd[1, 3] = cur_dp[1] + human_error[1] * taken_t / moving_t  # 목표 y 위치
+                T_sd[2, 3] = cur_dp[2] + human_error[2] * taken_t / moving_t  # 목표 z 위치
+
+                desired_position = np.array([T_sd[0, 3], T_sd[1, 3], T_sd[2, 3]])
+                desired_sphere.set_world_pose(desired_position)
+
+                # 마지막 업데이트 시간 기록
+                last_update_time = current_time
             
             num_points=10
             points_between, dist_vec = generate_points_between_positions(go_p, desired_position, num_points)
@@ -398,6 +429,7 @@ while simulation_app.is_running():
                 # nearest_index = np.argmin(distances)
                 # direction_vector = (desired_position - obstacles_positions[nearest_index])
                 # direction_vector /= np.linalg.norm(direction_vector)
+                
 
             T_bd = np.linalg.inv(T_sb) @ T_sd  
 

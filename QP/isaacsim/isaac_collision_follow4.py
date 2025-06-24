@@ -280,7 +280,7 @@ cylinder = DynamicCylinder(
 #     color=np.array([0.2, 0.8, 0.2])
 # )
 # human position with sphere
-human_position = np.array([0.2, 0.2, 0.97])
+human_position = np.array([0.1, 0.2, 0.97])
 human_sphere = VisualSphere(
     prim_path="/World/Xform/human_sphere",
     name="human_sphere",
@@ -494,9 +494,9 @@ while simulation_app.is_running():
             
             # cur_p_H = T_sb @ T
             # cur_p_ = cur_p_H[:3, 3]  # 현재 end-effector 위치
-            # num_points=10
-            # points_between, dist_vec = generate_points_between_positions(cur_p, human_position, num_points, T_sb @ T)
-            # xform_pose = np.vstack((xform_pose, points_between))  # 현재 xform_pose에 점 추가
+            num_points=10
+            points_between, dist_vec = generate_points_between_positions(cur_p, human_position, num_points, T_sb @ T)
+            xform_pose = np.vstack((xform_pose, points_between))  # 현재 xform_pose에 점 추가
 
             distances = [np.linalg.norm(human_position - obs[:3])-obstacle_radius for obs in obstacles_positions]
             min_distance = np.min(distances)
@@ -545,7 +545,7 @@ while simulation_app.is_running():
             Q = np.eye(n_dof + 6)
 
             # Joint velocity component of Q
-            Q[:2, :2] *= 1.0 / (et*100)
+            Q[:2, :2] *= 1.0 / (et)
 
             # Slack component of Q
             Q[n_dof :, n_dof :] = (1.0 / et) * np.eye(6)
@@ -574,81 +574,80 @@ while simulation_app.is_running():
                 c = J_a @ np.transpose(H[i, :, :])  # shape: (6,6)
                 J_m[i,0] = m_t * np.transpose(c.flatten("F")) @ JJ_inv.flatten("F")
 
-            A = np.zeros((n_dof + 6, n_dof + 6))
-            B = np.zeros(n_dof + 6)
-            A[: n_dof, : n_dof], B[: n_dof] = joint_velocity_damper(ps=rho_s, pi=rho_i, n=n_dof, gain=eta)  # joint velocity damper
-            
+            A = np.zeros((n_dof + num_points + 6, n_dof + 6))
+            B = np.zeros(n_dof + num_points + 6)
+
             J_dj = np.zeros(n_dof+6)
             w_p_sum = 0.0
             # min_dist = 0.0
             
             # print('test', q)
             # print('test', q[2:3])
-            # for i , pose in enumerate(xform_pose) :
-            #     distance, index, g_vec = get_nearest_obstacle_distance(pose, obstacles_positions[:, :3], obstacle_radius, T_cur)
-            #     # print('distance', distance)
-            #     min_dist = np.min(distance)
-            #     if i < 4:  # mobile base wheels
-            #         jac_mobile = F
-            #         jac_mobile_v = jac_mobile[:3,:]  # 3x2 자코비안 (선형 속도)
-            #         d_dot = g_vec @ jac_mobile_v
-            #         A[i, :2] = d_dot 
-            #         A[i, 2:] = np.zeros((1, n_dof - 2 + 6))  # arm joints
-            #         B[i] = (min_dist - d_safe) / (d_influence - d_safe) 
-            #         w_p = (d_influence-min_dist)/(d_influence-d_safe) 
-            #         J_dj[:8] += A[i, :8] * w_p  # 베이스 조인트 속도에 대한 제약 조건
-            #         w_p_sum += w_p
-            #     elif 3 < i < 10:  # UR5e joints
-            #         # print('aaaaa',i, T_sb @ T_b0 @ ur5e_robot.fkine(q[2:2 + i - 3],end = ur5e_robot.links[i - 2]).A)
-            #         T_instant = T_b0 @ ur5e_robot.fkine(q[2:2 + i - 3],end = ur5e_robot.links[i - 2]).A
-            #         jac_mobile = base.tr2adjoint(T_instant.T) @ F
+            for i , pose in enumerate(xform_pose) :
+                distance, index, g_vec = get_nearest_obstacle_distance(pose, obstacles_positions[:, :3], obstacle_radius, T_cur)
+                # print('distance', distance)
+                min_dist = np.min(distance)
+                if i < 4:  # mobile base wheels
+                    jac_mobile = F
+                    jac_mobile_v = jac_mobile[:3,:]  # 3x2 자코비안 (선형 속도)
+                    d_dot = g_vec @ jac_mobile_v
+                    A[i, :2] = d_dot 
+                    A[i, 2:] = np.zeros((1, n_dof - 2 + 6))  # arm joints
+                    B[i] = (min_dist - d_safe) / (d_influence - d_safe) 
+                    w_p = (d_influence-min_dist)/(d_influence-d_safe) 
+                    J_dj[:8] += A[i, :8] * w_p  # 베이스 조인트 속도에 대한 제약 조건
+                    w_p_sum += w_p
+                elif 3 < i < 10:  # UR5e joints
+                    # print('aaaaa',i, T_sb @ T_b0 @ ur5e_robot.fkine(q[2:2 + i - 3],end = ur5e_robot.links[i - 2]).A)
+                    T_instant = T_b0 @ ur5e_robot.fkine(q[2:2 + i - 3],end = ur5e_robot.links[i - 2]).A
+                    jac_mobile = base.tr2adjoint(T_instant.T) @ F
 
-            #         # print(ur5e_robot.links)
-            #         # world, base link, shoulder link, upper arm link, forearm link, wrist 1 link, wrist 2 link, wrist 3 link, tool link
-            #         jac_arm = base.tr2adjoint(T_instant.T) @ ur5e_robot.jacob0(q[2:2 + i - 3], end = ur5e_robot.links[i - 2])
-            #         J_mb_instant = np.hstack((jac_mobile, jac_arm))
-            #         J_mb_v_instant = J_mb_instant[:3, :] 
-            #         # print("J_mb_v_instant: ", J_mb_v_instant.shape)  
-            #         d_dot = g_vec @ J_mb_v_instant
+                    # print(ur5e_robot.links)
+                    # world, base link, shoulder link, upper arm link, forearm link, wrist 1 link, wrist 2 link, wrist 3 link, tool link
+                    jac_arm = base.tr2adjoint(T_instant.T) @ ur5e_robot.jacob0(q[2:2 + i - 3], end = ur5e_robot.links[i - 2])
+                    J_mb_instant = np.hstack((jac_mobile, jac_arm))
+                    J_mb_v_instant = J_mb_instant[:3, :] 
+                    # print("J_mb_v_instant: ", J_mb_v_instant.shape)  
+                    d_dot = g_vec @ J_mb_v_instant
 
-            #         A[i, :i-1] = d_dot
-            #         A[i, i-1:] = np.zeros((1, n_dof - (i-1) + 6))  # arm joints
-            #         B[i] = (min_dist - d_safe) / (d_influence - d_safe)
-            #         w_p = (d_influence-min_dist)/(d_influence-d_safe) 
-            #         J_dj[:8] += A[i, :8] * w_p  # 베이스 조인트 속도에 대한 제약 조건
-            #         w_p_sum += w_p
+                    A[i, :i-1] = d_dot
+                    A[i, i-1:] = np.zeros((1, n_dof - (i-1) + 6))  # arm joints
+                    B[i] = (min_dist - d_safe) / (d_influence - d_safe)
+                    w_p = (d_influence-min_dist)/(d_influence-d_safe) 
+                    J_dj[:8] += A[i, :8] * w_p  # 베이스 조인트 속도에 대한 제약 조건
+                    w_p_sum += w_p
 
-                # else:
-                #     T_topoint = np.eye(4)
-                #     T_topoint[:3, 3] = (i-9) * dist_vec  # 현재 점에서 목표 점까지의 변환 행렬
-                #     T_instant = T_b0 @ ur5e_robot.fkine(q[2:2 + 9 - 3],end = ur5e_robot.links[9 - 2]).A @ T_topoint
-                #     jac_mobile = base.tr2adjoint(T_instant.T) @ F
+                else:
+                    T_topoint = np.eye(4)
+                    T_topoint[:3, 3] = (i-9) * dist_vec  # 현재 점에서 목표 점까지의 변환 행렬
+                    T_instant = T_b0 @ ur5e_robot.fkine(q[2:2 + 9 - 3],end = ur5e_robot.links[9 - 2]).A @ T_topoint
+                    jac_mobile = base.tr2adjoint(T_instant.T) @ F
 
-                #     # print(ur5e_robot.links)
-                #     # world, base link, shoulder link, upper arm link, forearm link, wrist 1 link, wrist 2 link, wrist 3 link, tool link
-                #     jac_arm = base.tr2adjoint(T_instant.T) @ ur5e_robot.jacob0(q[2:2 + 9 - 3], end = ur5e_robot.links[9 - 2])
-                #     J_mb_instant = np.hstack((jac_mobile, jac_arm))
-                #     J_mb_v_instant = J_mb_instant[:3, :]  # 3x8 자코비안 (선형 속도)
+                    # print(ur5e_robot.links)
+                    # world, base link, shoulder link, upper arm link, forearm link, wrist 1 link, wrist 2 link, wrist 3 link, tool link
+                    jac_arm = base.tr2adjoint(T_instant.T) @ ur5e_robot.jacob0(q[2:2 + 9 - 3], end = ur5e_robot.links[9 - 2])
+                    J_mb_instant = np.hstack((jac_mobile, jac_arm))
+                    J_mb_v_instant = J_mb_instant[:3, :]  # 3x8 자코비안 (선형 속도)
 
-                #     d_dot = g_vec @ J_mb_v_instant
-                #     # print("d_dot: ", d_dot.shape)  # (8,)
-                #     A[i, :8] = d_dot
-                #     A[i, 8:] = np.zeros((1, 6))  # arm joints
-                #     B[i] = (min_dist - d_safe) / (d_influence - d_safe)
-                #     w_p = (d_influence-min_dist)/(d_influence-d_safe) 
-                #     J_dj[:8] += A[i, :8] * w_p  # 베이스 조인트 속도에 대한 제약 조건
-                #     w_p_sum += w_p
+                    d_dot = g_vec @ J_mb_v_instant
+                    # print("d_dot: ", d_dot.shape)  # (8,)
+                    A[i, :8] = d_dot
+                    A[i, 8:] = np.zeros((1, 6))  # arm joints
+                    B[i] = (min_dist - d_safe) / (d_influence - d_safe)
+                    w_p = (d_influence-min_dist)/(d_influence-d_safe) 
+                    J_dj[:8] += A[i, :8] * w_p  # 베이스 조인트 속도에 대한 제약 조건
+                    w_p_sum += w_p
 
 
             C = np.concatenate((np.zeros(2), -J_m.reshape((n_dof - 2,)), np.zeros(6)))
-            # lambda_max = 1.5
-            # lambda_c = (lambda_max /(d_influence - d_safe)**2) * (min_dist - d_influence)**2
-            # J_c = lambda_c * J_dj/w_p_sum
-            # C += J_c # 베이스 조인트 속도에 대한 제약 조건 추가
+            lambda_max = 1.5
+            lambda_c = (lambda_max /(d_influence - d_safe)**2) * (min_dist - d_influence)**2
+            J_c = lambda_c * J_dj/w_p_sum
+            C += J_c # 베이스 조인트 속도에 대한 제약 조건 추가
 
-            bTe = ur5e_robot.fkine(q[2:], include_base=False).A  
-            θε = atan2(bTe[1, -1], bTe[0, -1])
-            C[0] = - k_e * θε  # 베이스 x 위치 오차
+            # bTe = ur5e_robot.fkine(q[2:], include_base=False).A  
+            # θε = atan2(bTe[1, -1], bTe[0, -1])
+            # C[0] = - k_e * θε  # 베이스 x 위치 오차
 
             # A[: n_dof, : n_dof], B[: n_dof] = joint_velocity_damper(ps=rho_s, pi=rho_i, n=n_dof, gain=eta)  # joint velocity damper
     
@@ -737,7 +736,7 @@ while simulation_app.is_running():
 
 
             wc, vc = qd[0], qd[1]  # 베이스 속도
-            wc *= 5.0
+            wc *= 2.0
 
             r_m = 0.165
             l_m = 0.582

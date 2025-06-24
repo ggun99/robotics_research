@@ -114,7 +114,7 @@ while simulation_app.is_running():
                 joint_velocities=joint_velocities,
                 joint_indices=aljnu_joint_indices
             )
-            my_robot.apply_action(actions)
+            # my_robot.apply_action(actions)
 
         print("joints : ", my_robot.get_joint_positions())
 

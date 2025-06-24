@@ -78,41 +78,55 @@ def joint_velocity_damper(
 
         return Ain, Bin
 
-def get_nearest_obstacle_distance(position, obstacles, obstacle_radius, T_cur):
+def get_nearest_obstacle_distance(position, obstacles, obstacle_radius, T_e):
     """
-    Calculate the distance to the nearest obstacle from a given position.
+    Calculate the distance to the nearest obstacle from a given position in the end-effector frame.
     
     Args:
-        position (np.ndarray): The position from which to calculate the distance.
-        obstacles (list): A list of obstacle positions.
-        
+        position (np.ndarray): The position in world coordinates.
+        obstacles (list): A list of obstacle positions in world coordinates.
+        obstacle_radius (float): The radius of the obstacles.
+        T_cur (np.ndarray): The transformation matrix from world to the robot base.
+        T (np.ndarray): The transformation matrix from the robot base to the end-effector.
+
     Returns:
         float: The distance to the nearest obstacle.
-        index (int): The index of the nearest obstacle.
+        int: The index of the nearest obstacle.
+        np.ndarray: The directional vector to the nearest obstacle in the end-effector frame.
     """
+    # 엔드 이펙터의 변환 행렬
+    # T_e = T_cur @ T  # 월드 좌표계에서 엔드 이펙터 좌표계로의 변환
     for obs in obstacles:
-        obs[2] = position[2]  # Set the z-coordinate of the obstacle to the specified value
-    distances = [np.linalg.norm(position - obs)-obstacle_radius for obs in obstacles]
-    index = np.argmin(distances)
-    # x = position[0] - obstacles[index][0]
-    # y = position[1] - obstacles[index][1]
-    # z = position[2] - obstacles[index][2]
-    # x_norm = x / np.linalg.norm([x, y, z]) if np.linalg.norm([x, y, z]) != 0 else 0
-    # y_norm = y / np.linalg.norm([x, y, z]) if np.linalg.norm([x, y, z]) != 0 else 0
-    # z_norm = z / np.linalg.norm([x, y, z]) if np.linalg.norm([x, y, z]) != 0 else 0
-    # # Create a directional vector
-    # g_vec = np.zeros(3)  
-    # g_vec[0] = x_norm
-    # g_vec[1] = y_norm
-    # g_vec[2] = z_norm
+        obs[2] = position[2]
+    # position을 엔드 이펙터 좌표계로 변환
+    for i, position in enumerate(position):
+        if i < 10:
+            position_homogeneous = np.append(position, 1)  # 동차 좌표로 확장
+            position_local = np.linalg.inv(T_e) @ position_homogeneous
+            position_local = position_local[:3]  # 3차원으로 변환
+        else:
+            position_local = position[:3]
+    
 
-    # Create a directional vector
-    g_vec = (position - obstacles[index])
-    g_vec /= np.linalg.norm(g_vec)
-    # g_vec = np.linalg.inv(T_cur)[:3,:3] @ g_vec  # Transform to mobilebase frame
+    # obstacles를 엔드 이펙터 좌표계로 변환
+    obstacles_local = []
+    for obs in obstacles:
+        obs_homogeneous = np.append(obs, 1)  # 동차 좌표로 확장
+        obs_local = np.linalg.inv(T_e) @ obs_homogeneous
+        obstacles_local.append(obs_local[:3])  # 3차원으로 변환
+    obstacles_local = np.array(obstacles_local)
+
+    # 엔드 이펙터 좌표계에서 가장 가까운 장애물 계산
+    distances = [(np.linalg.norm(position_local[:2] - obs[:2]) - obstacle_radius) for obs in obstacles_local]
+    index = np.argmin(distances)
+
+    # 가장 가까운 장애물에 대한 방향 벡터 계산
+    g_vec = (position_local - obstacles_local[index])
+    g_vec /= np.linalg.norm(g_vec)  # 방향 벡터 정규화
+
     return distances, index, g_vec
 
-def generate_points_between_positions(start_pos, end_pos, num_points=10, T = None):
+def generate_points_between_positions(start_pos, end_pos, num_points=10, T_e = None):
     """
     두 3차원 위치를 이어주는 선에서 일정한 간격으로 점을 생성하는 함수.
 
@@ -124,11 +138,20 @@ def generate_points_between_positions(start_pos, end_pos, num_points=10, T = Non
     Returns:
         np.ndarray: 생성된 점들의 좌표 배열 (shape: num_points x 3).
     """
+    # position을 엔드 이펙터 좌표계로 변환
+    start_pos_homogeneous = np.append(start_pos, 1)  # 동차 좌표로 확장
+    start_pos_local = np.linalg.inv(T_e) @ start_pos_homogeneous
+    start_pos_local = start_pos_local[:3]  # 3차원으로 변환
+    # position을 엔드 이펙터 좌표계로 변환
+    end_pos_homogeneous = np.append(end_pos, 1)  # 동차 좌표로 확장
+    end_pos_local = np.linalg.inv(T_e) @ end_pos_homogeneous
+    end_pos_local = end_pos_local[:3]  # 3차원으로 변환
     # 시작 위치와 끝 위치를 연결하는 선을 따라 일정한 간격으로 점 생성
-    points = np.linspace(start_pos, end_pos, num_points)
+    points = np.linspace(start_pos_local, end_pos_local, num_points)
     dist_vec = (end_pos - start_pos)/num_points
-    dist_vec_local = np.linalg.inv(T)[:3,:3] @ dist_vec
-    return points, dist_vec_local
+    # print('dist_vec: ', dist_vec.shape)
+    # dist_vec_local = np.linalg.inv(T)[:3,:3] @ dist_vec
+    return points, dist_vec
 
 # et 값과 시간을 저장할 리스트
 et_values = []
@@ -221,7 +244,7 @@ human_goal_position = np.array([1.5, 1.0, 0.97])  # 사람의 목표 위치
 # 시뮬레이션 컨텍스트 초기화
 simulation_context = SimulationContext()
 obstacles_positions = planner.generate_obstacles(goal=human_goal_position)
-print(f"Generated obstacles: {obstacles_positions}")
+# print(f"Generated obstacles: {obstacles_positions}")
 # print(obstacles_positions.shape)  # (num_obstacles, 4)
 # print(obstacles_positions[:, :3])
 
@@ -315,8 +338,8 @@ y0 = mobile_base_pose[0][1]
 H_desired = None
 
 # collision avoidance parameters
-d_safe = 0.2
-d_influence = 0.6
+d_safe = 0.4
+d_influence = 1.0
 
 # moving human
 moving_t = 30.0  # 이동 시간
@@ -400,6 +423,7 @@ while simulation_app.is_running():
             xform_pose = np.array([rear_right_wheel_pose[0], rear_left_wheel_pose[0], front_right_wheel_pose[0], front_left_wheel_pose[0],
                                 ur5e_shoulder_pose[0], ur5e_upper_arm_pose[0], ur5e_forearm_pose[0], ur5e_wrist_1_pose[0], 
                                 ur5e_wrist_2_pose[0], ur5e_wrist_3_pose[0]])
+            # print("xform_pose: ", xform_pose)  # (10, 3)
             # print("xform_pose: ", xform_pose.shape) (10,3)
             # ['base_link', 'front_left_wheel_link', 'front_right_wheel_link', 'rear_left_wheel_link', 'rear_right_wheel_link', 
             # 'ur5e_shoulder_link', 'ur5e_upper_arm_link', 'ur5e_forearm_link', 'ur5e_wrist_1_link', 'ur5e_wrist_2_link', 'ur5e_wrist_3_link', 
@@ -442,27 +466,39 @@ while simulation_app.is_running():
                 # robot_target_position = human_position
 
                 # 로봇이 사람을 따라가기
-                T_cur = T_sb @ T  # 현재 로봇 위치
-                cur_p = T_cur[:3, 3]  # 현재 end-effector 위치
-                print(f"Current end-effector position: {cur_p}")
-                print(f"Human position: {human_position}")
-                direction_vector = human_position - cur_p
-                direction_vector /= np.linalg.norm(direction_vector)
-                # z축은 항상 위쪽을 향한다고 가정
-                z_axis = np.array([0, 0, 1])
+                T_cur = T_sb @ T  # 현재 로봇 위치 (월드 좌표계 기준)
+                cur_p = T_cur[:3, 3]  # 현재 엔드 이펙터 위치 (월드 좌표계 기준)
+
+                # 엔드 이펙터의 변환 행렬
+                T_e = T_cur  # 월드 좌표계에서 엔드 이펙터 좌표계로의 변환
+
+                # human_position을 엔드 이펙터 좌표계로 변환
+                human_position_homogeneous = np.append(human_position, 1)  # 동차 좌표로 확장
+                human_position_local = np.linalg.inv(T_e) @ human_position_homogeneous
+                human_position_local = human_position_local[:3]  # 3차원으로 변환
+
+                # 현재 엔드 이펙터 위치를 엔드 이펙터 좌표계로 변환 (항상 원점)
+                #cur_p_local = np.array([0, 0, 0])  # 엔드 이펙터 기준에서 자신의 위치는 원점
+
+                # 목표 방향 계산 (엔드 이펙터 좌표계 기준)
+                direction_vector = human_position_local # - cur_p_local
+                direction_vector /= np.linalg.norm(direction_vector)  # 방향 벡터 정규화
+
+                # z축은 항상 위쪽을 향한다고 가정 (엔드 이펙터 좌표계 기준)
+                y_axis = np.array([0, 0, 1])
 
                 # x축은 목표 방향을 바라보도록 설정
-                x_axis = direction_vector
+                z_axis = direction_vector
 
                 # y축은 x축과 z축의 외적을 통해 계산
-                y_axis = np.cross(z_axis, x_axis)
-                y_axis /= np.linalg.norm(y_axis)
+                x_axis = np.cross(y_axis, z_axis)
+                x_axis /= np.linalg.norm(x_axis)
 
                 # z축은 다시 x축과 y축의 외적을 통해 계산 (정확한 직교 보장)
-                z_axis = np.cross(x_axis, y_axis)
+                y_axis = np.cross(z_axis, x_axis)
 
                 # 회전 행렬 생성
-                rotation_matrix = np.vstack([x_axis, y_axis, z_axis]).T
+                rotation_matrix = np.vstack([z_axis, x_axis, y_axis]).T
 
 
                 # T_e = np.eye(4)
@@ -491,30 +527,15 @@ while simulation_app.is_running():
 
                 # 마지막 업데이트 시간 기록
                 last_update_time = current_time
-            
-            # cur_p_H = T_sb @ T
-            # cur_p_ = cur_p_H[:3, 3]  # 현재 end-effector 위치
-            # num_points=10
-            # points_between, dist_vec = generate_points_between_positions(cur_p, human_position, num_points, T_sb @ T)
-            # xform_pose = np.vstack((xform_pose, points_between))  # 현재 xform_pose에 점 추가
-
-            distances = [np.linalg.norm(human_position - obs[:3])-obstacle_radius for obs in obstacles_positions]
-            min_distance = np.min(distances)
-            if min_distance < d_safe:
-                print("Desired position is too close to an obstacle. Adjusting position.")
-                # Adjust the desired position to be further away from the nearest obstacle
-                # nearest_index = np.argmin(distances)
-                # direction_vector = (desired_position - obstacles_positions[nearest_index])
-                # direction_vector /= np.linalg.norm(direction_vector)
-                
+       
+            num_points=10
+            points_between, dist_vec = generate_points_between_positions(cur_p, human_position, num_points, T_e)
+            # print('points_between: ', points_between.shape)  # (10, 3)
+            xform_pose = np.vstack((xform_pose, points_between))  # 현재 xform_pose에 점 추가
 
             T_bd = np.linalg.inv(T_sb) @ T_sd  
 
-            H_desired = SE3(T_bd)  # 목표 end-effector 위치 
-            # print('H_current: ', H_current)
-            # print('H_desired: ', H_desired)
-            # print('T_sd: ', T_sd)
-            # print('T_sd_cal: ', T_sb @ T_b0 @ T_0e)
+            H_desired = SE3(T_bd)  # 목표 end-effector 위치
 
             F = np.array([[0.0, 1.0],
                             [0.0, 0.0],
@@ -574,81 +595,78 @@ while simulation_app.is_running():
                 c = J_a @ np.transpose(H[i, :, :])  # shape: (6,6)
                 J_m[i,0] = m_t * np.transpose(c.flatten("F")) @ JJ_inv.flatten("F")
 
-            A = np.zeros((n_dof + 6, n_dof + 6))
-            B = np.zeros(n_dof + 6)
-            A[: n_dof, : n_dof], B[: n_dof] = joint_velocity_damper(ps=rho_s, pi=rho_i, n=n_dof, gain=eta)  # joint velocity damper
+            A = np.zeros((n_dof + num_points + 6, n_dof + 6))
+            B = np.zeros(n_dof + num_points + 6)
+            # A[: n_dof, : n_dof], B[: n_dof] = joint_velocity_damper(ps=rho_s, pi=rho_i, n=n_dof, gain=eta)  # joint velocity damper
             
             J_dj = np.zeros(n_dof+6)
             w_p_sum = 0.0
-            # min_dist = 0.0
-            
-            # print('test', q)
-            # print('test', q[2:3])
-            # for i , pose in enumerate(xform_pose) :
-            #     distance, index, g_vec = get_nearest_obstacle_distance(pose, obstacles_positions[:, :3], obstacle_radius, T_cur)
-            #     # print('distance', distance)
-            #     min_dist = np.min(distance)
-            #     if i < 4:  # mobile base wheels
-            #         jac_mobile = F
-            #         jac_mobile_v = jac_mobile[:3,:]  # 3x2 자코비안 (선형 속도)
-            #         d_dot = g_vec @ jac_mobile_v
-            #         A[i, :2] = d_dot 
-            #         A[i, 2:] = np.zeros((1, n_dof - 2 + 6))  # arm joints
-            #         B[i] = (min_dist - d_safe) / (d_influence - d_safe) 
-            #         w_p = (d_influence-min_dist)/(d_influence-d_safe) 
-            #         J_dj[:8] += A[i, :8] * w_p  # 베이스 조인트 속도에 대한 제약 조건
-            #         w_p_sum += w_p
-            #     elif 3 < i < 10:  # UR5e joints
-            #         # print('aaaaa',i, T_sb @ T_b0 @ ur5e_robot.fkine(q[2:2 + i - 3],end = ur5e_robot.links[i - 2]).A)
-            #         T_instant = T_b0 @ ur5e_robot.fkine(q[2:2 + i - 3],end = ur5e_robot.links[i - 2]).A
-            #         jac_mobile = base.tr2adjoint(T_instant.T) @ F
+        
+            for i , pose in enumerate(xform_pose) :
+                distance, index, g_vec = get_nearest_obstacle_distance(pose, obstacles_positions[:, :3], obstacle_radius, T_cur)
+                # print('distance', distance)
+                min_dist = np.min(distance)
+                # print('min_dist', min_dist)
+                if min_dist < d_safe:
+                    print(f"robot {i+1}th link is too close to an obstacle. Distance: {min_dist:.2f} m")
+                if i < 4:  # mobile base wheels
+                
+                    jac_mobile_v = J_mb_v
+                    # print('jac_mobile_v', jac_mobile_v.shape)  # (3, 8)
+                    d_dot = g_vec @ jac_mobile_v
+                    A[i, :8] = d_dot 
+                    A[i, 8:] = np.zeros((1, 6)) 
+                    B[i] = (min_dist - d_safe) / (d_influence - d_safe) 
+                    w_p = (d_influence-min_dist)/(d_influence-d_safe) 
+                    # print('w_p', w_p)
+                    # print('A[i, :8]', A[i, :8].shape)
+                    # print((A[i, :8] * w_p).shape)
+                    J_dj[:8] += A[i, :8] * w_p  # 베이스 조인트 속도에 대한 제약 조건
+                    # print(J_dj.shape)
+                    w_p_sum += w_p
+                elif 3 < i < 10:  # UR5e joints
+                    
+                    J_mb_arm_v = np.hstack([np.zeros((3, i - 2)), J_mb_v[:3, i - 2: ]])
+                    print('J_mb_arm_v', J_mb_arm_v)  
+                    d_dot = g_vec @ J_mb_arm_v
 
-            #         # print(ur5e_robot.links)
-            #         # world, base link, shoulder link, upper arm link, forearm link, wrist 1 link, wrist 2 link, wrist 3 link, tool link
-            #         jac_arm = base.tr2adjoint(T_instant.T) @ ur5e_robot.jacob0(q[2:2 + i - 3], end = ur5e_robot.links[i - 2])
-            #         J_mb_instant = np.hstack((jac_mobile, jac_arm))
-            #         J_mb_v_instant = J_mb_instant[:3, :] 
-            #         # print("J_mb_v_instant: ", J_mb_v_instant.shape)  
-            #         d_dot = g_vec @ J_mb_v_instant
+                    A[i, :8] = d_dot
+                    A[i, 8:] = np.zeros((1, 6)) 
+                    B[i] = (min_dist - d_safe) / (d_influence - d_safe)
+                    w_p = (d_influence-min_dist)/(d_influence-d_safe) 
+                    J_dj[:8] += A[i, :8] * w_p  # 베이스 조인트 속도에 대한 제약 조건
+                    w_p_sum += w_p
 
-            #         A[i, :i-1] = d_dot
-            #         A[i, i-1:] = np.zeros((1, n_dof - (i-1) + 6))  # arm joints
-            #         B[i] = (min_dist - d_safe) / (d_influence - d_safe)
-            #         w_p = (d_influence-min_dist)/(d_influence-d_safe) 
-            #         J_dj[:8] += A[i, :8] * w_p  # 베이스 조인트 속도에 대한 제약 조건
-            #         w_p_sum += w_p
+                else:
+                    dist_T = np.eye(4)
+                    dist_T[:3, 3] = pose.reshape(-1)  
+                    T_ = T @ dist_T
+                    J_p_ = base.tr2adjoint(T_.T) @ F  # 6x2 자코비안 (선형 속도)
+                    J_a_e_ = base.tr2adjoint(T_.T) @ ur5e_robot.jacob0(q[2:])
+                    J_mb_ = np.hstack((J_p_, J_a_e_))  # 6x8 자코비안 (선형 속도 + 각속도)
+                    J_mb_v_ = J_mb_[:3, :]  # 3x8 자코비안 (선형 속도)
+                    J_mb_arm_v = np.hstack([np.zeros((3, 7)), J_mb_v_[:3, 7: ]])
+                    # print('J_mb_arm_v', J_mb_arm_v.shape)  
+                    d_dot = g_vec @ J_mb_arm_v
 
-                # else:
-                #     T_topoint = np.eye(4)
-                #     T_topoint[:3, 3] = (i-9) * dist_vec  # 현재 점에서 목표 점까지의 변환 행렬
-                #     T_instant = T_b0 @ ur5e_robot.fkine(q[2:2 + 9 - 3],end = ur5e_robot.links[9 - 2]).A @ T_topoint
-                #     jac_mobile = base.tr2adjoint(T_instant.T) @ F
-
-                #     # print(ur5e_robot.links)
-                #     # world, base link, shoulder link, upper arm link, forearm link, wrist 1 link, wrist 2 link, wrist 3 link, tool link
-                #     jac_arm = base.tr2adjoint(T_instant.T) @ ur5e_robot.jacob0(q[2:2 + 9 - 3], end = ur5e_robot.links[9 - 2])
-                #     J_mb_instant = np.hstack((jac_mobile, jac_arm))
-                #     J_mb_v_instant = J_mb_instant[:3, :]  # 3x8 자코비안 (선형 속도)
-
-                #     d_dot = g_vec @ J_mb_v_instant
-                #     # print("d_dot: ", d_dot.shape)  # (8,)
-                #     A[i, :8] = d_dot
-                #     A[i, 8:] = np.zeros((1, 6))  # arm joints
-                #     B[i] = (min_dist - d_safe) / (d_influence - d_safe)
-                #     w_p = (d_influence-min_dist)/(d_influence-d_safe) 
-                #     J_dj[:8] += A[i, :8] * w_p  # 베이스 조인트 속도에 대한 제약 조건
-                #     w_p_sum += w_p
+                    A[i, :8] = d_dot
+                    A[i, 8:] = np.zeros((1, 6)) 
+                    B[i] = (min_dist - d_safe) / (d_influence - d_safe)
+                    w_p = (d_influence-min_dist)/(d_influence-d_safe) 
+                    J_dj[:8] += A[i, :8] * w_p  # 베이스 조인트 속도에 대한 제약 조건
+                    w_p_sum += w_p
 
 
             C = np.concatenate((np.zeros(2), -J_m.reshape((n_dof - 2,)), np.zeros(6)))
-            # lambda_max = 1.5
-            # lambda_c = (lambda_max /(d_influence - d_safe)**2) * (min_dist - d_influence)**2
-            # J_c = lambda_c * J_dj/w_p_sum
-            # C += J_c # 베이스 조인트 속도에 대한 제약 조건 추가
+            print('C:', C.shape)  # (8,)
+            lambda_max = 1.5
+            lambda_c = (lambda_max /(d_influence - d_safe)**2) * (min_dist - d_influence)**2
+            J_c = lambda_c * J_dj/w_p_sum
+            C += J_c # 베이스 조인트 속도에 대한 제약 조건 추가
 
-            bTe = ur5e_robot.fkine(q[2:], include_base=False).A  
-            θε = atan2(bTe[1, -1], bTe[0, -1])
-            C[0] = - k_e * θε  # 베이스 x 위치 오차
+            # bTe = ur5e_robot.fkine(q[2:], include_base=False).A  
+            # θε = atan2(bTe[1, -1], bTe[0, -1])
+            # C[0] = - k_e * θε  # 베이스 x 위치 오차
 
             # A[: n_dof, : n_dof], B[: n_dof] = joint_velocity_damper(ps=rho_s, pi=rho_i, n=n_dof, gain=eta)  # joint velocity damper
     
@@ -689,6 +707,7 @@ while simulation_app.is_running():
                 print("et:", et)
             if et < 0.02:
                 qd = qd[: n_dof]
+                qd = 0.0 * qd
                 print("Reached desired position!")
                 # qd *= 0.0 # 목표 위치에 도달했음을 나타냄
 
