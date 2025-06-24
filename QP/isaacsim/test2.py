@@ -78,7 +78,7 @@ def joint_velocity_damper(
 
         return Ain, Bin
 
-def get_nearest_obstacle_distance(position, obstacles, obstacle_radius, T_e):
+def get_nearest_obstacle_distance(i, position, obstacles, obstacle_radius, T_e):
     """
     Calculate the distance to the nearest obstacle from a given position in the end-effector frame.
     
@@ -99,13 +99,13 @@ def get_nearest_obstacle_distance(position, obstacles, obstacle_radius, T_e):
     for obs in obstacles:
         obs[2] = position[2]
     # position을 엔드 이펙터 좌표계로 변환
-    for i, position in enumerate(position):
-        if i < 10:
-            position_homogeneous = np.append(position, 1)  # 동차 좌표로 확장
-            position_local = np.linalg.inv(T_e) @ position_homogeneous
-            position_local = position_local[:3]  # 3차원으로 변환
-        else:
-            position_local = position[:3]
+    
+    if i < 10:
+        position_homogeneous = np.append(pose, 1)  # 동차 좌표로 확장
+        position_local = np.linalg.inv(T_e) @ position_homogeneous
+        position_local = position_local[:3]  # 3차원으로 변환
+    else:
+        position_local = pose[:3]
     
 
     # obstacles를 엔드 이펙터 좌표계로 변환
@@ -114,12 +114,19 @@ def get_nearest_obstacle_distance(position, obstacles, obstacle_radius, T_e):
         obs_homogeneous = np.append(obs, 1)  # 동차 좌표로 확장
         obs_local = np.linalg.inv(T_e) @ obs_homogeneous
         obstacles_local.append(obs_local[:3])  # 3차원으로 변환
+        # print('obs_local: ', obs_local[:3])
+        # print('obs_local shape: ', obstacles_local)
     obstacles_local = np.array(obstacles_local)
+    # print('obstacles_local: ', obstacles_local.shape)
 
     # 엔드 이펙터 좌표계에서 가장 가까운 장애물 계산
+    # print('position_local: ', position_local)
+    # print('obstacles_local: ', obstacles_local)
+    # print('postion_local[:2]: ', position_local[:2])
+    # print('obstacles_local[:2]: ', obstacles_local[:,:2])
     distances = [(np.linalg.norm(position_local[:2] - obs[:2]) - obstacle_radius) for obs in obstacles_local]
+    # print('distances: ', distances)
     index = np.argmin(distances)
-
     # 가장 가까운 장애물에 대한 방향 벡터 계산
     g_vec = (position_local - obstacles_local[index])
     g_vec /= np.linalg.norm(g_vec)  # 방향 벡터 정규화
@@ -139,13 +146,16 @@ def generate_points_between_positions(start_pos, end_pos, num_points=10, T_e = N
         np.ndarray: 생성된 점들의 좌표 배열 (shape: num_points x 3).
     """
     # position을 엔드 이펙터 좌표계로 변환
-    start_pos_homogeneous = np.append(start_pos, 1)  # 동차 좌표로 확장
-    start_pos_local = np.linalg.inv(T_e) @ start_pos_homogeneous
-    start_pos_local = start_pos_local[:3]  # 3차원으로 변환
+    # start_pos_homogeneous = np.append(start_pos, 1)  # 동차 좌표로 확장
+    # start_pos_local = np.linalg.inv(T_e) @ start_pos_homogeneous
+    # start_pos_local = start_pos_local[:3]  # 3차원으로 변환
+    start_pos_local = np.zeros(3)   # 엔드 이펙터 좌표계에서 시작 위치
     # position을 엔드 이펙터 좌표계로 변환
     end_pos_homogeneous = np.append(end_pos, 1)  # 동차 좌표로 확장
     end_pos_local = np.linalg.inv(T_e) @ end_pos_homogeneous
     end_pos_local = end_pos_local[:3]  # 3차원으로 변환
+    # print('start_pos_local: ', start_pos_local)
+    # print('end_pos_local: ', end_pos_local)
     # 시작 위치와 끝 위치를 연결하는 선을 따라 일정한 간격으로 점 생성
     points = np.linspace(start_pos_local, end_pos_local, num_points)
     dist_vec = (end_pos - start_pos)/num_points
@@ -530,7 +540,21 @@ while simulation_app.is_running():
        
             num_points=10
             points_between, dist_vec = generate_points_between_positions(cur_p, human_position, num_points, T_e)
-            # print('points_between: ', points_between.shape)  # (10, 3)
+            # points_between에 있는 점들을 월드 좌표계로 변환하고 구를 생성
+            for i, point in enumerate(points_between):
+                # 점을 월드 좌표계로 변환
+                point_homogeneous = np.append(point, 1)  # 동차 좌표로 확장
+                point_world = T_e @ point_homogeneous  # 엔드 이펙터 좌표계에서 월드 좌표계로 변환
+                point_world = point_world[:3]  # 3차원으로 변환
+
+                # 구 생성
+                sphere = VisualSphere(
+                    prim_path=f"/World/Xform/point_sphere_{i}",
+                    name=f"point_sphere_{i}",
+                    position=point_world,
+                    radius=0.02,
+                    color=np.array([0.8, 0.8, 0.2])  # 노란색
+                )
             xform_pose = np.vstack((xform_pose, points_between))  # 현재 xform_pose에 점 추가
 
             T_bd = np.linalg.inv(T_sb) @ T_sd  
@@ -603,11 +627,11 @@ while simulation_app.is_running():
             w_p_sum = 0.0
         
             for i , pose in enumerate(xform_pose) :
-                distance, index, g_vec = get_nearest_obstacle_distance(pose, obstacles_positions[:, :3], obstacle_radius, T_cur)
+                distance, index, g_vec = get_nearest_obstacle_distance(i, pose, obstacles_positions[:, :3], obstacle_radius, T_cur)
                 # print('distance', distance)
                 min_dist = np.min(distance)
                 # print('min_dist', min_dist)
-                if min_dist < d_safe:
+                if min_dist < 0.0:
                     print(f"robot {i+1}th link is too close to an obstacle. Distance: {min_dist:.2f} m")
                 if i < 4:  # mobile base wheels
                 
@@ -627,7 +651,7 @@ while simulation_app.is_running():
                 elif 3 < i < 10:  # UR5e joints
                     
                     J_mb_arm_v = np.hstack([np.zeros((3, i - 2)), J_mb_v[:3, i - 2: ]])
-                    print('J_mb_arm_v', J_mb_arm_v)  
+                    # print('J_mb_arm_v', J_mb_arm_v)  
                     d_dot = g_vec @ J_mb_arm_v
 
                     A[i, :8] = d_dot
@@ -658,7 +682,7 @@ while simulation_app.is_running():
 
 
             C = np.concatenate((np.zeros(2), -J_m.reshape((n_dof - 2,)), np.zeros(6)))
-            print('C:', C.shape)  # (8,)
+            # print('C:', C.shape)  # (8,)
             lambda_max = 1.5
             lambda_c = (lambda_max /(d_influence - d_safe)**2) * (min_dist - d_influence)**2
             J_c = lambda_c * J_dj/w_p_sum
