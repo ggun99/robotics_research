@@ -14,10 +14,40 @@ from isaacsim.robot.manipulators.grippers import ParallelGripper
 from isaacsim.core.utils.stage import add_reference_to_stage
 from isaacsim.core.prims import Articulation
 from isaacsim.core.utils.types import ArticulationActions
+from isaacsim.core.prims import Articulation, XFormPrim
+
+import isaacsim.core.utils.prims as prim_utils
+from pxr import Gf
+import numpy as np
+
+# 월드에 빛을 추가합니다.
+# prim_path는 빛이 생성될 USD 경로입니다.
+# prim_type은 "DistantLight"로 지정합니다.
+# position은 빛의 위치를 설정하지만, Directional Light의 경우 방향이 더 중요합니다.
+# orientation은 빛의 방향을 설정합니다. (쿼터니언 형식)
+# attributes는 빛의 속성을 설정합니다.
+#   - "inputs:intensity": 빛의 강도
+#   - "inputs:color": 빛의 색상 (RGB 튜플)
+
+# Gf.Quatd 객체를 numpy 배열로 변환
+orientation_quat = Gf.Quatd(0.7071068, 0, 0.7071068, 0)  # 기존 쿼터니언
+orientation_np = np.array([orientation_quat.GetReal(), *orientation_quat.GetImaginary()])  # numpy 배열로 변환
+
+# create_prim 호출
+distant_light_prim = prim_utils.create_prim(
+    "/World/DistantLight",
+    "DistantLight",
+    position=Gf.Vec3d(0, 0, 10),  # 위치
+    orientation=orientation_np,  # numpy 배열로 변환된 쿼터니언
+    attributes={
+        "inputs:intensity": 2000,
+        "inputs:color": (1.0, 1.0, 1.0),  # 흰색 빛
+    }
+)
+
 
 # from omni.isaac.core.utils.prims import is_prim_path_valid
 # from omni.isaac.core.utils.prims import get_all_matching_child_prims
-import numpy as np
 
 world = World(stage_units_in_meters=1.0)
 scene = world.scene
@@ -84,11 +114,11 @@ while simulation_app.is_running():
                 joint_indices=aljnu_joint_indices
             )
             my_robot.apply_action(actions)
-            print("current_positions shape:", current_positions.shape)
-            print("target_joint_positions shape:", target_joint_positions.shape)
-            print("current_positions:", current_positions)
-            print("target_joint_positions:", target_joint_positions)
-            print("diff:", np.abs(current_positions[4:10] - target_joint_positions[4:10]))
+            # print("current_positions shape:", current_positions.shape)
+            # print("target_joint_positions shape:", target_joint_positions.shape)
+            # print("current_positions:", current_positions)
+            # print("target_joint_positions:", target_joint_positions)
+            # print("diff:", np.abs(current_positions[4:10] - target_joint_positions[4:10]))
             # 목표 자세 도달 여부 체크
             if np.all(np.abs(current_positions[4:10] - target_joint_positions[4:10]) < position_tolerance):
                 reached_default = True
@@ -97,25 +127,48 @@ while simulation_app.is_running():
         else:
             # 2단계: velocity 제어
             # i += 1
+            # 엔드 이펙터의 변환 행렬 가져오기
+            # end_effector_index = aljnu_joint_indices[-1]  # 엔드 이펙터의 조인트 인덱스 (마지막 조인트)
+            # end_effector_pose = my_robot.get_world_poses(indices=[end_effector_index])
+            rear_right_wheel_link = "/World/aljnu_mp/rear_right_wheel_link"
+            prim_rear_right_wheel = XFormPrim(rear_right_wheel_link)
+            rear_right_wheel_pose, rear_right_wheel_quat = prim_rear_right_wheel.get_world_poses()
+            rear_left_wheel_link = "/World/aljnu_mp/rear_left_wheel_link"
+            prim_rear_left_wheel = XFormPrim(rear_left_wheel_link)
+            rear_left_wheel_pose, rear_left_wheel_quat = prim_rear_left_wheel.get_world_poses()
+            front_right_wheel_link = "/World/aljnu_mp/front_right_wheel_link"
+            prim_front_right_wheel = XFormPrim(front_right_wheel_link)
+            front_right_wheel_pose, front_right_wheel_quat = prim_front_right_wheel.get_world_poses()
+            front_left_wheel_link = "/World/aljnu_mp/front_left_wheel_link"
+            prim_front_left_wheel = XFormPrim(front_left_wheel_link)
+            front_left_wheel_pose, front_left_wheel_quat = prim_front_left_wheel.get_world_poses()
+            print("rear_right_wheel_pose: ", rear_right_wheel_pose)
+            print("rear_left_wheel_pose: ", rear_left_wheel_pose)
+            print("front_right_wheel_pose: ", front_right_wheel_pose)
+            print("front_left_wheel_pose: ", front_left_wheel_pose)
+            base_link = "/World/aljnu_mp/base_link"
+            prim_base_link = XFormPrim(base_link)
+            base_pose, base_quat = prim_base_link.get_world_poses()
+            print("base_pose: ", base_pose)
             
             joint_velocities = np.zeros(16)
             # joint_velocities = np.zeros_like(current_positions)
             current_velocity = np.array(my_robot.get_joint_velocities()).reshape(-1)
-            print("current_velocity: ", current_velocity)
+            # print("current_velocity: ", current_velocity)
             # current_velocity[0][0] = 0.0  # 예시: 첫 번째 조인트
             # current_velocity[0][1] = 0.0 # 예시: 두 번째 조인트
             # current_velocity[0][2] = 0.0
             # current_velocity[0][3] = 0.0
             # current_velocity[0] = np.zeros_like(current_velocity)  # 모든 조인트 속도를 0으로 초기화
             # joint_velocities[9] = 0.5
-            print("changed current_velocity: ", joint_velocities)
-            my_robot.switch_control_mode("velocity")
+            # print("changed current_velocity: ", joint_velocities)
+            # my_robot.switch_control_mode("velocity")
             actions = ArticulationActions(
                 joint_velocities=joint_velocities,
                 joint_indices=aljnu_joint_indices
             )
             # my_robot.apply_action(actions)
 
-        print("joints : ", my_robot.get_joint_positions())
+        # print("joints : ", my_robot.get_joint_positions())
 
 simulation_app.close()

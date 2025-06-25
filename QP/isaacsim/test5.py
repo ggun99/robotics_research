@@ -95,29 +95,14 @@ def get_nearest_obstacle_distance(position, obstacles, obstacle_radius, T_e):
         int: The index of the nearest obstacle.
         np.ndarray: The directional vector to the nearest obstacle in the end-effector frame.
     """
-    # 엔드 이펙터의 변환 행렬
-    # T_e = T_cur @ T  # 월드 좌표계에서 엔드 이펙터 좌표계로의 변환
-    obstacles_local = []
+    # 월드 기준 좌표계에서의 distance, 방향벡터
+
     for obs in obstacles:
         obs[2] = position[2]
-        obs_homogeneous = np.append(obs, 1)  # 동차 좌표로 확장
-        obs_local = np.linalg.inv(T_e) @ obs_homogeneous
-        obstacles_local.append(obs_local[:3])  # 3차원으로 변환
-    obstacles_local = np.array(obstacles_local)
-    # position을 엔드 이펙터 좌표계로 변환
-    
-    
-    position_homogeneous = np.append(position, 1)  # 동차 좌표로 확장
-    position_local = np.linalg.inv(T_e) @ position_homogeneous
-    position_local = position_local[:3]  # 3차원으로 변환
-    
-    distances = [((np.linalg.norm(position_local - obse)) - obstacle_radius) for obse in obstacles_local]
+        distances = ((np.linalg.norm(position - obs)) - obstacle_radius)
     index = np.argmin(distances)
-    # 가장 가까운 장애물에 대한 방향 벡터 계산
-    # print('obstacles_local: ', obstacles_local)
-    # print('index: ', index)
-    # print('obstacles_local[index]: ', obstacles_local[index])   
-    g_vec = (position_local - obstacles_local[index])
+
+    g_vec = (position - obstacles[index])
     g_vec /= np.linalg.norm(g_vec)  # 방향 벡터 정규화
 
     return distances, index, g_vec
@@ -222,9 +207,9 @@ k_e = 0.5
 rho_i = 0.9 # influence distance
 rho_s = 0.1  # safety factor
 eta = 1
-qdlim = np.array([1.3]*8)
+qdlim = np.array([1.5]*8)
 qdlim[:1] = 1.5  # 베이스 조인트 속도 제한
-qdlim[1] = 1.5
+qdlim[1] = 1.0
 qlim = np.array([[-np.inf, -np.inf, -3.14159265, -3.14159265, -3.14159265, -3.14159265, -3.14159265, -3.14159265],
                                [ np.inf, np.inf, 3.14159265,  3.14159265,  3.14159265,  3.14159265,  3.14159265,  3.14159265]])
 
@@ -238,7 +223,7 @@ world.reset()
 
 # 파라미터 설정
 map_size = 6
-num_obstacles = 3
+num_obstacles = 2
 min_distance_between_obstacles = 1.5
 obstacle_radius_range = (0.25, 0.25)
 
@@ -250,21 +235,17 @@ planner = RealTime3DTrajectoryPlanner(
     step_size=0.1,  # RRT step size
     goal_sample_rate=0.1,  # 목표 샘플링 확률
     max_iter=1000,  # 최대 반복 횟수
-    goal_clearance=0.45,  # 목표 지점에서의 여유 공간
+    goal_clearance=0.6,  # 목표 지점에서의 여유 공간
     safety_margin=0.2,  # 안전 여유 공간
-    z_range=(1.1, 1.1)  # z축 범위 설정 (고정 높이, 예: 0.97m)
+    z_range=(0.97, 0.97)  # z축 범위 설정 (고정 높이, 예: 0.97m)
 )
 # 사람의 경로 생성
-human_start_position = np.array([0.9, 0.1332, 0.97])  # 사람의 시작 위치
-human_goal_position = np.array([3.5, 2.0, 1.2])  # 사람의 목표 위치
+human_start_position = np.array([0.5922, 0.1332, 0.97])  # 사람의 시작 위치
+human_goal_position = np.array([1.5, 1.0, 0.97])  # 사람의 목표 위치
 
 # 시뮬레이션 컨텍스트 초기화
 simulation_context = SimulationContext()
-# obstacles_positions = planner.generate_obstacles(goal=human_goal_position)
-obstacles_positions = np.array([
-     [1.2,1.8, 0.97],
-     [2.8, 0.5, 0.97],
-     [2.5 , 2.2, 0.97]])
+obstacles_positions = planner.generate_obstacles(goal=human_goal_position)
 # print(f"Generated obstacles: {obstacles_positions}")
 # print(obstacles_positions.shape)  # (num_obstacles, 4)
 # print(obstacles_positions[:, :3])
@@ -307,14 +288,14 @@ cylinder = DynamicCylinder(
     height=obstacle_height,
     color=np.array([0.8, 0.2, 0.2])
 )
-cylinder = DynamicCylinder(
-    prim_path="/World/Xform/Cylinder3",
-    name="cylinder3",
-    position=obstacles_positions[2][:3],
-    radius=obstacle_radius,
-    height=obstacle_height,
-    color=np.array([0.8, 0.2, 0.2])
-)
+# cylinder = DynamicCylinder(
+#     prim_path="/World/Xform/Cylinder3",
+#     name="cylinder3",
+#     position=obstacles_positions[2][:3],
+#     radius=obstacle_radius,
+#     height=obstacle_height,
+#     color=np.array([0.8, 0.2, 0.2])
+# )
 # desired position with sphere
 desired_sphere = VisualSphere(
     prim_path="/World/Xform/sphere",
@@ -359,8 +340,8 @@ y0 = mobile_base_pose[0][1]
 H_desired = None
 
 # collision avoidance parameters
-d_safe = 0.15
-d_influence = 0.4
+d_safe = 0.1
+d_influence = 0.6
 
 # moving human
 moving_t = 30.0  # 이동 시간
@@ -501,15 +482,24 @@ while simulation_app.is_running():
                 direction_vector = human_position_local # - cur_p_local
                 direction_vector /= np.linalg.norm(direction_vector)  # 방향 벡터 정규화
 
+                # # z축은 항상 위쪽을 향한다고 가정 (엔드 이펙터 좌표계 기준)
+                # x_axis = np.array([1, 0, 0])
+
+                # z_axis = direction_vector
+
+                # y_axis = np.cross(x_axis, z_axis)
+                # y_axis /= np.linalg.norm(y_axis)
+
+                # x_axis = np.cross(z_axis, y_axis)
+
+                # # 회전 행렬 생성
+                # rotation_matrix = np.vstack([z_axis, y_axis, x_axis]).T
+
                 # 로봇의 현재 x축 방향 (엔드 이펙터의 x축)
                 current_x_axis = T_e[:3, 0]  # 엔드 이펙터 변환 행렬의 첫 번째 열
 
-                # 엔드 이펙터 기준의 방향 벡터 (direction_vector)를 월드 좌표계로 변환
-                direction_vector_homogeneous = np.append(direction_vector, 0)  # 방향 벡터는 동차 좌표로 확장 (위치가 아니므로 마지막 값은 0)
-                direction_vector_world = T_e[:3, :3] @ direction_vector_homogeneous[:3]  # 회전 행렬만 적용하여 월드 좌표계로 변환
-
-                # z_axis를 월드 좌표계 기준으로 설정
-                z_axis = direction_vector_world / np.linalg.norm(direction_vector_world)  # 정규화
+                # z축은 목표 방향 (human_position - cur_p)
+                z_axis = direction_vector
 
                 # y축은 현재 x축 방향과 z축의 외적
                 y_axis = np.cross(current_x_axis, z_axis)
@@ -521,10 +511,15 @@ while simulation_app.is_running():
 
                 # 회전 행렬 생성
                 rotation_matrix = np.vstack([z_axis, y_axis, x_axis]).T
+
+                ee_matrix = np.eye(4)
+                ee_matrix[:3, :3] = rotation_matrix  # 회전 행렬 설정
+
+                T_ee = T_sb @ T @ ee_matrix
                 
                 # 로봇의 목표 위치 설정
                 T_sd = np.eye(4)
-                T_sd[:3, :3] = rotation_matrix #T_ee[:3,:3] #rotation_matrix # T_er[:3, :3]  # 회전 행렬은 단위 행렬로 설정
+                T_sd[:3, :3] = T_ee[:3,:3] #rotation_matrix # T_er[:3, :3]  # 회전 행렬은 단위 행렬로 설정
 
                 T_sd[0, 3] = human_position[0] #robot_target_position[0]
                 T_sd[1, 3] = human_position[1] #robot_target_position[1]
@@ -591,7 +586,7 @@ while simulation_app.is_running():
             Q[:2, :2] *= 1.0 / (et*100)
 
             # Slack component of Q
-            Q[n_dof :, n_dof :] = (1.0 / et) * np.eye(6)
+            Q[n_dof :, n_dof :] = (0.3 / et) * np.eye(6)
 
             H = np.zeros((n_dof-2, 6, n_dof-2))  # same as jacobm
 
@@ -609,12 +604,7 @@ while simulation_app.is_running():
             m_det = np.linalg.det(m)  
             m_t = np.sqrt(m_det)  # manipulability (sqrt(det(J * J^T)))
 
-            rank = np.linalg.matrix_rank(J_a @ J_a.T)
-            if rank < J_a.shape[0]:
-                print("Warning: Jacobian matrix is rank-deficient. Robot may be in a singularity.")
-                JJ_inv = np.linalg.pinv(J_a @ J_a.T)  # 유사역행렬 사용
-            else:
-                JJ_inv = np.linalg.inv(J_a @ J_a.T)  # 역행렬 계산
+            JJ_inv = np.linalg.inv((J_a @ J_a.T))  #.reshape(-1, order='F')
 
             # Compute manipulability Jacobian only for arm joints
             J_m = np.zeros((n_dof-2,1))
@@ -633,26 +623,16 @@ while simulation_app.is_running():
                 distance, index, g_vec = get_nearest_obstacle_distance(pose, obstacles_positions[:, :3], obstacle_radius, T_cur)
                 min_dist = np.min(distance)
                 min_dist_list.append(min_dist)  # 최소 거리 추가
-                # print('min_dist', min_dist)
                 
                 if i < 4:  # mobile base wheels
                 
-                    position_homogeneous = np.append(pose, 1)  # 동차 좌표로 확장
-                    position_local = np.linalg.inv(T_e) @ position_homogeneous
-                    position_local = position_local[:3]  # 3차원으로 변환
-                    dist_T = np.eye(4)
-                    dist_T[:3, 3] = position_local
-                    T_ = T @ dist_T
-                    J_p_ = base.tr2adjoint(T_.T) @ F  # 6x2 자코비안 (선형 속도)
-                    J_a_e_ = base.tr2adjoint(T_.T) @ ur5e_robot.jacob0(q[2:])
-                    J_mb_ = np.hstack((J_p_, J_a_e_))  # 6x8 자코비안 (선형 속도 + 각속도)
-                    J_mb_v_ = J_mb_[:3, :]  # 3x8 자코비안 (선형 속도)
-                    # J_mb_arm_v_ = np.hstack([J_mb_v_, np.zeros((3, 6))])
-
-                    d_dot = (-g_vec) @ J_mb_v_ # J_mb_arm_v_
+                    # mobile base 기준 계산
+                    J_mb_v_ = F[:3,:]
+                    g_vec = np.linalg.inv(T_sb[:3, :3]) @ g_vec # world 에서 mobile base 기준으로 변환
+                    d_dot = g_vec @ J_mb_v_
                     
-                    A[i, :8] = d_dot 
-                    A[i, 8:] = np.zeros((1, 6)) 
+                    A[i, :2] = d_dot 
+                    A[i, 2:] = np.zeros((1, 12)) 
                     B[i] = (min_dist - d_safe) / (d_influence - d_safe) 
                     w_p = (d_influence-min_dist)/(d_influence-d_safe) 
                     J_dj[:8] += A[i, :8] * w_p  # 베이스 조인트 속도에 대한 제약 조건
@@ -663,11 +643,14 @@ while simulation_app.is_running():
                         print(f"B : {B[i]:.2f}")
                 elif 3 < i < 10:  # UR5e joints
                     
-                    J_mb_arm_v = np.hstack([np.zeros((3, i - 2)), J_mb_v[:3, i - 2: ]])
-                    d_dot = (-g_vec) @ J_mb_arm_v
+                    # mobile base 기준 계산
+                    J_mb_ = np.hstack((F , ur5e_robot.jacob0(q[2:2 + i - 3],end = ur5e_robot.links[i - 2])))
+                    J_mb_v_ = J_mb_[:3,:]
+                    g_vec = np.linalg.inv(T_sb[:3, :3]) @ g_vec # world 에서 mobile base 기준으로 변환
+                    d_dot = g_vec @ J_mb_v_
 
-                    A[i, :8] = d_dot
-                    A[i, 8:] = np.zeros((1, 6)) 
+                    A[i, :i-1] = d_dot
+                    A[i, i-1:] = np.zeros((1, 15 - i)) 
                     B[i] = (min_dist - d_safe) / (d_influence - d_safe)
                     w_p = (d_influence-min_dist)/(d_influence-d_safe) 
                     J_dj[:8] += A[i, :8] * w_p  # 베이스 조인트 속도에 대한 제약 조건
@@ -675,19 +658,25 @@ while simulation_app.is_running():
 
 
                 else:
-                    position_homogeneous = np.append(pose, 1)  # 동차 좌표로 확장
-                    position_local = np.linalg.inv(T_e) @ position_homogeneous
-                    position_local = position_local[:3]  # 3차원으로 변환
-                    dist_T = np.eye(4)
-                    dist_T[:3, 3] = position_local
-                    T_ = T @ dist_T
-                    J_p_ = base.tr2adjoint(T_.T) @ F  # 6x2 자코비안 (선형 속도)
-                    J_a_e_ = base.tr2adjoint(T_.T) @ ur5e_robot.jacob0(q[2:])
-                    J_mb_ = np.hstack((J_p_, J_a_e_))  # 6x8 자코비안 (선형 속도 + 각속도)
-                    J_mb_v_ = J_mb_[:3, :]  # 3x8 자코비안 (선형 속도)
-                    J_mb_arm_v_ = np.hstack([np.zeros((3, 7)), J_mb_v_[:3, 7: ]])
+                    # mobile base 기준 계산
+                    J_mb_ = np.hstack((F , ur5e_robot.jacob0(q[2:])))
+                    J_mb_v_ = J_mb_[:3,:]
+                    g_vec = np.linalg.inv(T_sb[:3, :3]) @ g_vec # world 에서 mobile base 기준으로 변환
+                    d_dot = g_vec @ J_mb_v_
 
-                    d_dot = (-g_vec) @ J_mb_arm_v_
+                    # position_homogeneous = np.append(pose, 1)  # 동차 좌표로 확장
+                    # position_local = np.linalg.inv(T_e) @ position_homogeneous
+                    # position_local = position_local[:3]  # 3차원으로 변환
+                    # dist_T = np.eye(4)
+                    # dist_T[:3, 3] = position_local
+                    # T_ = T @ dist_T
+                    # J_p_ = base.tr2adjoint(T_.T) @ F  # 6x2 자코비안 (선형 속도)
+                    # J_a_e_ = base.tr2adjoint(T_.T) @ ur5e_robot.jacob0(q[2:])
+                    # J_mb_ = np.hstack((J_p_, J_a_e_))  # 6x8 자코비안 (선형 속도 + 각속도)
+                    # J_mb_v_ = J_mb_[:3, :]  # 3x8 자코비안 (선형 속도)
+                    # J_mb_arm_v_ = np.hstack([np.zeros((3, 7)), J_mb_v_[:3, 7: ]])
+
+                    # d_dot = g_vec @ J_mb_arm_v_
 
                     A[i, :8] = d_dot
                     A[i, 8:] = np.zeros((1, 6)) 
@@ -699,16 +688,15 @@ while simulation_app.is_running():
 
 
             C = np.concatenate((np.zeros(2), -J_m.reshape((n_dof - 2,)), np.zeros(6)))
+            # C = np.zeros(14)
             bTe = ur5e_robot.fkine(q[2:], include_base=False).A  
             θε = atan2(bTe[1, -1], bTe[0, -1])
-            weight = 0.5 * np.sum(np.abs(human_goal_position - T_e[:3, 3]))  # 목표 위치와 현재 위치의 차이
-            C[0] = - weight * k_e * θε  # 베이스 x 위치 오차
-
-            lambda_max = 0.2
+            C[0] = - k_e * θε  # 베이스 x 위치 오차
+            
+            lambda_max = 0.5
             min_distance = np.min(min_dist_list)  # 장애물과의 최소 거리
-            # lambda_c = (lambda_max /(d_influence - d_safe)**2) * (min_distance - d_influence)**2
-            # J_c = lambda_c * J_dj/w_p_sum
-            J_c = J_dj/w_p_sum
+            lambda_c = (lambda_max /(d_influence - d_safe)**2) * (min_distance - d_influence)**2
+            J_c = lambda_c * J_dj/w_p_sum
 
             C += J_c # 베이스 조인트 속도에 대한 제약 조건 추가
             
@@ -740,29 +728,30 @@ while simulation_app.is_running():
             if et > 0.5:
                 qd = qd[: n_dof]
                 # qd = 2 * qd
-                # qd[:2] = 2 * qd[:2] 
+                qd[:2] = 2 * qd[:2] 
             elif 0.5 > et > 0.2 : 
                 qd = qd[: n_dof]
-                # qd = 1.5 * qd
+                qd[:2] = 1.5 * qd[:2] 
             else:
                 qd = qd[: n_dof]
-                # qd[:2] = 0.5 * qd[:2] 
+                qd[:2] = 0.5 * qd[:2] 
 
-                # qd[2:] = 0.5 * qd[2:]  # UR5e 조인트 속도 증가
+                qd[2:] = 2 * qd[2:]  # UR5e 조인트 속도 증가
                 # qd = 0.5 * qd
                 print("et:", et)
             if et < 0.03:
                 qd = qd[: n_dof]
                 qd = 0.0 * qd
                 print("Reached desired position!")
+                # qd *= 0.0 # 목표 위치에 도달했음을 나타냄
 
-                 # 그래프 저장
-                plt.savefig("error_reduction_graph_x_2.png")
-                print("Graph saved as 'error_reduction_graph.png'")
+                #  # 그래프 저장
+                # plt.savefig("error_reduction_graph_x_2.png")
+                # print("Graph saved as 'error_reduction_graph.png'")
 
-                # 시뮬레이션 종료
-                simulation_app.close()
-                break
+                # # 시뮬레이션 종료
+                # simulation_app.close()
+                # break
             # 현재 시뮬레이션 시간
             current_time = world.current_time
 

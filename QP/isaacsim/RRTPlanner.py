@@ -31,30 +31,26 @@ class RealTime3DTrajectoryPlanner:
             self.goal = goal
         obstacles = []
         while len(obstacles) < self.num_obstacles:
-            x = random.uniform(-self.map_size/2, self.map_size/2)
-            y = random.uniform(-self.map_size/2, self.map_size/2)
+            # x = random.uniform(-self.map_size/2, self.map_size/2)
+            # y = random.uniform(-self.map_size/2, self.map_size/2)
+            x = random.uniform(-0.5, self.map_size/2)
+            y = random.uniform(-0.5, self.map_size/2)
             z = random.uniform(*self.z_range)
             r = random.uniform(*self.obstacle_radius_range)
             candidate = (x, y, z, r)
             too_close = False
 
-            robot_workspace_radius = 1.0  # 로봇 작업 공간 반경 (예: 1m)
-            robot_center = np.array([0, 0, 0])  # 로봇의 중심 위치
-
             robot_workspace_radius = 1.0  # 로봇 작업 공간 반경
-            robot_base_radius = 0.5  # 로봇 베이스 반경
-
+            # 초기위치와 겹치는지 확인
             for ox, oy, oz, orad in obstacles:
-                dist_to_robot_center = np.linalg.norm(np.array([ox, oy, oz]) - robot_center)
+                # dist_to_robot_center = np.linalg.norm(np.array([ox, oy, oz]) - robot_center)
                 dist_to_robot_base = np.hypot(ox, oy)
-                if dist_to_robot_base < orad + r + self.min_distance_between_obstacles or \
-                dist_to_robot_center < robot_workspace_radius or \
-                dist_to_robot_base < robot_base_radius:
+                if dist_to_robot_base < orad + robot_workspace_radius :
                     too_close = True
                     break
 
             if self.goal is not None:
-                dist_to_goal = np.linalg.norm(np.array([x, y, z]) - self.goal)
+                dist_to_goal = np.linalg.norm(np.array([x, y]) - self.goal[:2])
                 if dist_to_goal < self.goal_clearance + r:
                     too_close = True
 
