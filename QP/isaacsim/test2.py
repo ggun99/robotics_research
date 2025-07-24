@@ -18,6 +18,7 @@ from isaacsim.core.prims import Articulation, XFormPrim
 from isaacsim.core.utils.types import ArticulationActions
 from isaacsim.core.utils.prims import create_prim
 from pxr import UsdGeom, Gf
+from isaacsim.sensors.camera import Camera
 import isaacsim.core.utils.prims as prim_utils
 
 import numpy as np
@@ -161,7 +162,7 @@ time_values = []
 
 
 # Matplotlib 인터랙티브 모드 활성화
-plt.ion()
+# plt.ion()
 fig, ax = plt.subplots(figsize=(10, 6))
 
 # 초기 그래프 설정
@@ -196,6 +197,13 @@ assets_root_path = get_assets_root_path()
 orientation_quat = Gf.Quatd(0.7071068, 0, 0.7071068, 0)  # 기존 쿼터니언
 orientation_np = np.array([orientation_quat.GetReal(), *orientation_quat.GetImaginary()])  # numpy 배열로 변환
 
+camera = Camera(
+    prim_path="/World/MyCamera",
+    resolution=(1280, 720),
+    frequency=20,
+    position=(4.04, 1.4318, 8.66154),
+    orientation=(0.2690812, 0.761412, -0.5560824, -0.1965182)
+)
 # create_prim 호출
 distant_light_prim = prim_utils.create_prim(
     "/World/DistantLight",
@@ -255,7 +263,7 @@ planner = RealTime3DTrajectoryPlanner(
     z_range=(1.1, 1.1)  # z축 범위 설정 (고정 높이, 예: 0.97m)
 )
 # 사람의 경로 생성
-human_start_position = np.array([0.9, 0.1332, 0.97])  # 사람의 시작 위치
+human_start_position = np.array([1.0, 0.15, 1.0])  # 사람의 시작 위치
 human_goal_position = np.array([3.5, 2.0, 1.2])  # 사람의 목표 위치
 
 # 시뮬레이션 컨텍스트 초기화
@@ -264,7 +272,7 @@ simulation_context = SimulationContext()
 obstacles_positions = np.array([
      [1.2,1.8, 0.97],
      [2.8, 0.5, 0.97],
-     [2.5 , 2.2, 0.97]])
+     [2.5 , 2.3, 0.97]])
 # print(f"Generated obstacles: {obstacles_positions}")
 # print(obstacles_positions.shape)  # (num_obstacles, 4)
 # print(obstacles_positions[:, :3])
@@ -360,7 +368,7 @@ H_desired = None
 
 # collision avoidance parameters
 d_safe = 0.15
-d_influence = 0.4
+d_influence = 1.0
 
 # moving human
 moving_t = 30.0  # 이동 시간
@@ -525,6 +533,14 @@ while simulation_app.is_running():
                 # 로봇의 목표 위치 설정
                 T_sd = np.eye(4)
                 T_sd[:3, :3] = rotation_matrix #T_ee[:3,:3] #rotation_matrix # T_er[:3, :3]  # 회전 행렬은 단위 행렬로 설정
+                det = np.linalg.det(rotation_matrix)
+                orthogonality_check = np.allclose(rotation_matrix.T @ rotation_matrix, np.eye(3))
+
+                if not np.isclose(det, 1.0) or not orthogonality_check:
+                    print("Invalid rotation matrix detected. Normalizing...")
+                    U, _, Vt = np.linalg.svd(rotation_matrix)
+                    rotation_matrix_normalized = U @ Vt
+                    T_bd[:3, :3] = rotation_matrix_normalized
 
                 T_sd[0, 3] = human_position[0] #robot_target_position[0]
                 T_sd[1, 3] = human_position[1] #robot_target_position[1]
@@ -556,7 +572,8 @@ while simulation_app.is_running():
             xform_pose = np.vstack((xform_pose, points_world))  # 현재 xform_pose에 점 추가
 
             T_bd = np.linalg.inv(T_sb) @ T_sd  
-
+            # print("T_bd:", T_bd)
+            # print("T_bd shape:", T_bd.shape)
             H_desired = SE3(T_bd)  # 목표 end-effector 위치
 
             F = np.array([[0.0, 1.0],
@@ -622,12 +639,15 @@ while simulation_app.is_running():
                 c = J_a @ np.transpose(H[i, :, :])  # shape: (6,6)
                 J_m[i,0] = m_t * np.transpose(c.flatten("F")) @ JJ_inv.flatten("F")
 
-            A = np.zeros((n_dof + num_points + 6, n_dof + 6))
-            B = np.zeros(n_dof + num_points + 6)
+            A = np.zeros((n_dof+ 2 + num_points + 6, n_dof + 6))
+            B = np.zeros(n_dof+ 2 + num_points + 6)
             
             J_dj = np.zeros(n_dof+6)
             w_p_sum = 0.0
             min_dist_list = []  # 장애물과의 최소 거리 리스트
+            print("xform_pose shape: ", xform_pose.shape)  # (10, 3) + (num_points, 3)
+            print(f"Ashape: {A.shape}, B shape: {B.shape}")
+
             for i , pose in enumerate(xform_pose) :
 
                 distance, index, g_vec = get_nearest_obstacle_distance(pose, obstacles_positions[:, :3], obstacle_radius, T_cur)
@@ -696,19 +716,21 @@ while simulation_app.is_running():
 
                     J_dj[:8] += A[i, :8] * w_p  # 베이스 조인트 속도에 대한 제약 조건
                     w_p_sum += w_p
+            print(f"Ashape: {A.shape}, B shape: {B.shape}")
 
 
             C = np.concatenate((np.zeros(2), -J_m.reshape((n_dof - 2,)), np.zeros(6)))
             bTe = ur5e_robot.fkine(q[2:], include_base=False).A  
             θε = atan2(bTe[1, -1], bTe[0, -1])
-            weight = 0.5 * np.sum(np.abs(human_goal_position - T_e[:3, 3]))  # 목표 위치와 현재 위치의 차이
-            C[0] = - weight * k_e * θε  # 베이스 x 위치 오차
+            # weight = 0.3 * np.sum(np.abs(human_goal_position - T_e[:3, 3]))  # 목표 위치와 현재 위치의 차이
+            C[0] = - k_e * θε  # 베이스 x 위치 오차
+            # C *= weight
 
-            lambda_max = 0.2
+            lambda_max = 0.4
             min_distance = np.min(min_dist_list)  # 장애물과의 최소 거리
-            # lambda_c = (lambda_max /(d_influence - d_safe)**2) * (min_distance - d_influence)**2
-            # J_c = lambda_c * J_dj/w_p_sum
-            J_c = J_dj/w_p_sum
+            lambda_c = (lambda_max /(d_influence - d_safe)**2) * (min_distance - d_influence)**2
+            J_c = lambda_c * J_dj/w_p_sum
+            # J_c = J_dj/w_p_sum
 
             C += J_c # 베이스 조인트 속도에 대한 제약 조건 추가
             
@@ -757,7 +779,7 @@ while simulation_app.is_running():
                 print("Reached desired position!")
 
                  # 그래프 저장
-                plt.savefig("error_reduction_graph_x_2.png")
+                # plt.savefig("error_reduction_graph_x_2.png")
                 print("Graph saved as 'error_reduction_graph.png'")
 
                 # 시뮬레이션 종료
@@ -796,7 +818,7 @@ while simulation_app.is_running():
             ax.set_xlim(0, max(10, current_time))
             ax.set_ylim(0, max(1, max(et_values) * 1.1))
 
-            plt.pause(0.01)  # 그래프 업데이트 간격
+            # plt.pause(0.01)  # 그래프 업데이트 간격
             
 
 

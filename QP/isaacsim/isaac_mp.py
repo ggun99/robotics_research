@@ -142,15 +142,18 @@ while simulation_app.is_running():
             front_left_wheel_link = "/World/aljnu_mp/front_left_wheel_link"
             prim_front_left_wheel = XFormPrim(front_left_wheel_link)
             front_left_wheel_pose, front_left_wheel_quat = prim_front_left_wheel.get_world_poses()
-            print("rear_right_wheel_pose: ", rear_right_wheel_pose)
-            print("rear_left_wheel_pose: ", rear_left_wheel_pose)
-            print("front_right_wheel_pose: ", front_right_wheel_pose)
-            print("front_left_wheel_pose: ", front_left_wheel_pose)
+            # print("rear_right_wheel_pose: ", rear_right_wheel_pose)
+            # print("rear_left_wheel_pose: ", rear_left_wheel_pose)
+            # print("front_right_wheel_pose: ", front_right_wheel_pose)
+            # print("front_left_wheel_pose: ", front_left_wheel_pose)
             base_link = "/World/aljnu_mp/base_link"
             prim_base_link = XFormPrim(base_link)
             base_pose, base_quat = prim_base_link.get_world_poses()
-            print("base_pose: ", base_pose)
-            
+            # print("base_pose: ", base_pose)
+            ur5e_wrist_3_link = "/World/aljnu_mp/ur5e_wrist_3_link"
+            prim_wrist_3 = XFormPrim(ur5e_wrist_3_link)
+            ur5e_wrist_3_pose, ur5e_wrist_3_quat = prim_wrist_3.get_world_poses()
+            print("ur5e_wrist_3_pose: ", ur5e_wrist_3_pose)
             joint_velocities = np.zeros(16)
             # joint_velocities = np.zeros_like(current_positions)
             current_velocity = np.array(my_robot.get_joint_velocities()).reshape(-1)
