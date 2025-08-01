@@ -110,7 +110,8 @@ class Vision_Tracker(Node):
             else : 
                 print(f"The distance can not be computed at {{{x};{y}}}")
                 self.position = None
-                
+            cv.imshow('Detected Markers', imgnp)   
+            cv.waitKey(1)
     
     def Transform(self):
         if self.position is not None:
