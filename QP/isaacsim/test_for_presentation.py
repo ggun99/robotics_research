@@ -421,6 +421,10 @@ T_robot = None  # 로봇의 현재 위치를 저장할 변수
 last_update_time = None
 update_interval = 0.1  # 업데이트 간격 (초)
 
+g_vec_f = None
+len_cable = 0.02
+w_obs = 0.00001
+
 while simulation_app.is_running():
     world.step(render=True)
     if world.is_playing():
@@ -512,7 +516,9 @@ while simulation_app.is_running():
 
             T = T_b0 @ T_0e  # 베이스 프레임 기준 end-effector 위치
             H_current = SE3(T)  # 현재 end-effector 위치
-
+            if T_robot is None:
+                T_robot = T
+                desired_sphere.set_world_pose(T_robot[:3, 3])
             if start_t is None:
                 start_t = world.current_time
      
@@ -599,11 +605,25 @@ while simulation_app.is_running():
                     U, _, Vt = np.linalg.svd(rotation_matrix)
                     rotation_matrix_normalized = U @ Vt
                     T_bd[:3, :3] = rotation_matrix_normalized
-
-                T_sd[0, 3] = robot_target_position[0] #robot_target_position[0]
-                T_sd[1, 3] = robot_target_position[1] #robot_target_position[1]
-                T_sd[2, 3] = robot_target_position[2] #robot_target_position[2]
-
+                cur_p = human_sphere.get_world_pose()[0]
+                cur_dp = desired_sphere.get_world_pose()[0]
+                d_vec = cur_p - cur_dp  # 현재 위치와 목표 위치 간의 벡터
+                d_vec_norm = np.linalg.norm(d_vec)  # 벡터의 크기
+                d_vec_unit = d_vec / d_vec_norm if d_vec_norm != 0 else np.zeros_like(d_vec)
+                if g_vec_f is not None:
+                    print('g_vec_f:', g_vec_f)
+                    # g_vec_f가 None이 아닐 때만 사용
+                    T_sd[0, 3] = cur_dp[0] + g_vec_f[0] * w_obs + d_vec_unit[0] * len_cable
+                    T_sd[1, 3] = cur_dp[1] + g_vec_f[1] * w_obs + d_vec_unit[1] * len_cable
+                    T_sd[2, 3] = cur_dp[2] + g_vec_f[2] * w_obs + d_vec_unit[2] * len_cable
+                else:
+                    T_sd[0, 3] = cur_dp[0] + d_vec_unit[0] * len_cable #human_error[0] * taken_t / moving_t  # 목표 x 위치
+                    T_sd[1, 3] = cur_dp[1] + d_vec_unit[1] * len_cable #human_error[1] * taken_t / moving_t  # 목표 y 위치
+                    T_sd[2, 3] = cur_dp[2] + d_vec_unit[2] * len_cable
+                # T_sd[0, 3] = robot_target_position[0] #robot_target_position[0]
+                # T_sd[1, 3] = robot_target_position[1] #robot_target_position[1]
+                # T_sd[2, 3] = robot_target_position[2] #robot_target_position[2]
+                desired_sphere.set_world_pose(T_sd[:3, 3])  # 목표 위치 업데이트
                 # 마지막 업데이트 시간 기록
                 last_update_time = current_time
        
@@ -779,7 +799,7 @@ while simulation_app.is_running():
                     J_dj[:8] += A[i, :8] * w_p  # 베이스 조인트 속도에 대한 제약 조건
                     w_p_sum += w_p
             # print(f"Ashape: {A.shape}, B shape: {B.shape}")
-
+            g_vec_f = g_vec
             # 그래프 표시
             if first_plot:
                 # 그래프 저장
