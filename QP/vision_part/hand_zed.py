@@ -150,9 +150,12 @@ class Vision_Hand(Node):
             print(f"Hand position: {self.position}")
             # human position based on camera
             H_c2h = np.array([[1,0,0,self.position[0]],[0,1,0,self.position[1]],[0,0,1,self.position[2]],[0,0,0,1]])
-
+            
+            r2cx = 0.0
+            r2cy = 0.0
+            r2cz = 0.0
             # camera based on ur5e base
-            H_r2c = np.array([[0,0,1,0],[-1,0,0,0],[0,-1,0,0],[0,0,0,1]])
+            H_r2c = np.array([[0,0,1,r2cx],[-1,0,0,r2cy],[0,-1,0,r2cz],[0,0,0,1]])
 
             # aruco based on scout
             self.H_r2h = H_r2c @ H_c2h

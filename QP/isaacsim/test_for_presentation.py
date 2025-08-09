@@ -422,8 +422,8 @@ last_update_time = None
 update_interval = 0.1  # 업데이트 간격 (초)
 
 g_vec_f = None
-len_cable = 0.02
-w_obs = 0.00001
+len_cable = 0.03
+w_obs = 0.005
 
 while simulation_app.is_running():
     world.step(render=True)
@@ -613,6 +613,9 @@ while simulation_app.is_running():
                 if g_vec_f is not None:
                     print('g_vec_f:', g_vec_f)
                     # g_vec_f가 None이 아닐 때만 사용
+                    # T_sd[0, 3] = cur_dp[0] + d_vec_unit[0] * len_cable #human_error[0] * taken_t / moving_t  # 목표 x 위치
+                    # T_sd[1, 3] = cur_dp[1] + d_vec_unit[1] * len_cable #human_error[1] * taken_t / moving_t  # 목표 y 위치
+                    # T_sd[2, 3] = cur_dp[2] + d_vec_unit[2] * len_cable
                     T_sd[0, 3] = cur_dp[0] + g_vec_f[0] * w_obs + d_vec_unit[0] * len_cable
                     T_sd[1, 3] = cur_dp[1] + g_vec_f[1] * w_obs + d_vec_unit[1] * len_cable
                     T_sd[2, 3] = cur_dp[2] + g_vec_f[2] * w_obs + d_vec_unit[2] * len_cable
@@ -793,7 +796,7 @@ while simulation_app.is_running():
 
                     A[i, :8] = d_dot
                     A[i, 8:] = np.zeros((1, 6)) 
-                    B[i] = (min_dist - d_safe) / (d_influence - d_safe)
+                    B[i] = (min_dist - d_safe) / (d_influence - d_safe) * 1.5 # 장애물과 dlo사이에는 부딪힐 수 있음.
                     w_p = (d_influence-min_dist)/(d_influence-d_safe) 
 
                     J_dj[:8] += A[i, :8] * w_p  # 베이스 조인트 속도에 대한 제약 조건
