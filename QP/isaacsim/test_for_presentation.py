@@ -21,6 +21,8 @@ from pxr import UsdGeom, Gf
 from isaacsim.sensors.camera import Camera
 import isaacsim.core.utils.prims as prim_utils
 
+from roboticstoolbox import DHRobot, RevoluteDH
+
 import numpy as np
 from scipy.spatial.transform import Rotation as R
 from math import atan2 as atan2
@@ -31,6 +33,17 @@ import matplotlib.pyplot as plt
 import random
 from RRTPlanner2 import RealTime3DTrajectoryPlanner
 import cvxpy as cp
+
+
+# # 실제 UR5e 로봇의 DH 파라미터 정의
+# ur5e_dh = DHRobot([
+#     RevoluteDH(a=0,      alpha=np.pi/2, d=0.089159, offset=0),
+#     RevoluteDH(a=-0.425, alpha=0,       d=0,        offset=0),
+#     RevoluteDH(a=-0.3922, alpha=0,      d=0,        offset=0),
+#     RevoluteDH(a=0,      alpha=np.pi/2, d=0.10915,  offset=0),
+#     RevoluteDH(a=0,      alpha=-np.pi/2, d=0.09465, offset=0),
+#     RevoluteDH(a=0,      alpha=0,       d=0.0823,   offset=0)
+# ], name="UR5e")
 
 def joint_velocity_damper(
         ps: float = 0.05,
@@ -842,7 +855,7 @@ while simulation_app.is_running():
 
             # Angular error
             e[3:] = base.tr2rpy(eTep, unit="rad", order="zyx", check=False)
-            # print(f"e: {e}")
+            print(f"e: {e}")
             k = np.eye(6)  # gain
             k[:3,:] *= 8.0 # gain
             v = k @ e
