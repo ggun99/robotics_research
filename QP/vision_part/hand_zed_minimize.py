@@ -8,7 +8,7 @@ import numpy as np
 import math
 import cv2 as cv
 import mediapipe as mp
-from ultralytics import YOLO
+# from ultralytics import YOLO
 
 class Vision_Hand(Node):
     def __init__(self):
@@ -26,8 +26,9 @@ class Vision_Hand(Node):
         # [ULTRA depth mode : Computation mode that favors edges and sharpness. Requires more GPU memory and computation power.] 
         # [PERFORMANCE for faster processing : Computation mode optimized for speed.]
         init_params.coordinate_units = sl.UNIT.MILLIMETER  # Use meter units (for depth measurements)    
-        # init_params.camera_resolution = sl.RESOLUTION.VGA  # Set resolution to 640x480  HD2K: 약 1m,  HD1080: 약 0.7m, HD720: 약 0.5m (500mm), VGA: 약 0.3m (300mm)
-        # init_params.camera_fps = 100 # Optional: Set FPS (e.g., 30 FPS)
+        init_params.camera_resolution = sl.RESOLUTION.VGA  # Set resolution to 672x376  HD2K: 약 1m,  HD1080: 약 0.7m, HD720: 약 0.5m (500mm), VGA: 약 0.3m (300mm)
+        init_params.camera_fps = 60 # Optional: Set FPS (e.g., 30 FPS)
+        init_params.depth_minimum_distance = 0.3 # Set minimum depth distance to 0.3m
         # Open the camera   
         status = self.zed.open(init_params)
         if status != sl.ERROR_CODE.SUCCESS: #Ensure the camera has opened succesfully
@@ -40,7 +41,7 @@ class Vision_Hand(Node):
 
         mirror_ref = sl.Transform()
         mirror_ref.set_translation(sl.Translation(2.75,4.0,0))
-        self.yolo_model = YOLO("yolov8n.pt")  # Load YOLOv8 model
+        # self.yolo_model = YOLO("yolov8n.pt")  # Load YOLOv8 model
         # MediaPipe Hands
         self.mp_hands = mp.solutions.hands
         self.hands = self.mp_hands.Hands(static_image_mode=False,
@@ -56,6 +57,7 @@ class Vision_Hand(Node):
         self.previous_position = None
 
     def Image_Processing(self):
+        
         # A new image is available if grab() returns SUCCESS
         if self.zed.grab(self.runtime_parameters) == sl.ERROR_CODE.SUCCESS:
             # Retrieve left image
@@ -70,7 +72,8 @@ class Vision_Hand(Node):
                 print("Image not loaded. Please check the image path or URL.")
                 return
             # resize_img = cv.resize(imgnp, (640, 480))  # Resize for speed
-
+            camera_info = self.zed.get_camera_information()
+            # print("Camera resolution:", imgnp.shape)
             imgrgb = cv.cvtColor(imgnp, cv.COLOR_BGRA2RGB)
             imgbgr = cv.cvtColor(imgrgb, cv.COLOR_RGB2BGR)
 
@@ -102,14 +105,15 @@ class Vision_Hand(Node):
                     
                     err, point_cloud_value = self.point_cloud.get_value(x, y)
                     # Check if point_cloud_value is valid
+                    # print(f"Point cloud value: {point_cloud_value}")
                     if isinstance(point_cloud_value, (list, np.ndarray)) and len(point_cloud_value) >= 3 and math.isfinite(point_cloud_value[2]):
                         distance = math.sqrt(point_cloud_value[0] ** 2 +
                                             point_cloud_value[1] ** 2 +
                                             point_cloud_value[2] ** 2)
                         Z = point_cloud_value[2]  # Z축 값 (깊이)
-                        X = Z * (x - 640) / self.focal_left_x
-                        Y = Z * (y - 360) / self.focal_left_y
-                        print(f"3D position to Camera : X : {X}, Y : {Y}, Z : {Z}")
+                        X = Z * (x - 336) / self.focal_left_x
+                        Y = Z * (y - 188) / self.focal_left_y
+                        # print(f"3D position to Camera : X : {X}, Y : {Y}, Z : {Z}")
                         hand_positions.append([X, Y, Z])
                         hand_dist.append(distance)
                         self.previous_position = [X, Y, Z]  # Update previous position
@@ -128,6 +132,7 @@ class Vision_Hand(Node):
                     hand_dist_array = np.array(hand_dist)
                     min_index = np.argmin(hand_dist_array)
                     self.position = hand_positions[min_index]
+                    self.no_hand = False
                 else:
                     self.position = None
                     self.no_hand = True
@@ -137,9 +142,9 @@ class Vision_Hand(Node):
                 self.no_hand = True
                 print("No hands detected.")
 
-            # 4. Draw person boxes
-            for x1, y1, x2, y2 in person_boxes:
-                cv.rectangle(imgbgr, (x1, y1), (x2, y2), (0, 255, 0), 2)
+            # # 4. Draw person boxes
+            # for x1, y1, x2, y2 in person_boxes:
+            #     cv.rectangle(imgbgr, (x1, y1), (x2, y2), (0, 255, 0), 2)
 
             cv.imshow("YOLO + Hand Tracking", imgbgr)
             cv.waitKey(1)
@@ -147,7 +152,7 @@ class Vision_Hand(Node):
     
     def Transform(self):
         if self.position is not None:
-            print(f"Hand position: {self.position}")
+            
             # human position based on camera
             H_c2h = np.array([[1,0,0,self.position[0]],[0,1,0,self.position[1]],[0,0,1,self.position[2]],[0,0,0,1]])
             
@@ -160,6 +165,7 @@ class Vision_Hand(Node):
             # aruco based on scout
             self.H_r2h = H_r2c @ H_c2h
 
+            print(f"Hand position: {self.position}")
         else:
             self.H_r2h = np.array([[1,0,0,0],[0,1,0,0],[0,0,1,0],[0,0,0,1]])
     
@@ -171,7 +177,7 @@ class Vision_Hand(Node):
         if self.no_hand == True:
             print('No hand detected, no publish')
         else:
-            print(self.H_r2h)
+            # print(self.H_r2h)
             a_pose.position.x = float(self.H_r2h[0][3])
             a_pose.position.y = float(self.H_r2h[1][3])
             a_pose.position.z = float(self.H_r2h[2][3])

@@ -7,11 +7,8 @@ simulation_app = SimulationApp({"headless": False})
 
 
 from isaacsim.core.utils.nucleus import get_assets_root_path
-# from omni.isaac.core.utils.stage import update_stage
 from isaacsim.core.api import World, SimulationContext
-from isaacsim.core.api.objects import DynamicCylinder, VisualSphere
-# from isaacsim.core.api.materials import PhysicsMaterial
-# from isaacsim.cortex.framework.robot import CortexUr10
+from isaacsim.core.api.objects import DynamicCylinder, VisualSphere, VisualCylinder
 from isaacsim.robot.manipulators.grippers import ParallelGripper
 from isaacsim.core.utils.stage import add_reference_to_stage
 from isaacsim.core.prims import Articulation, XFormPrim
@@ -33,6 +30,7 @@ import matplotlib.pyplot as plt
 import random
 from RRTPlanner2 import RealTime3DTrajectoryPlanner
 import cvxpy as cp
+from mpl_toolkits.mplot3d import Axes3D
 
 
 # # 실제 UR5e 로봇의 DH 파라미터 정의
@@ -167,6 +165,22 @@ def generate_points_between_positions(start_pos, end_pos, num_points=10, T_e = N
     # dist_vec_local = np.linalg.inv(T)[:3,:3] @ dist_vec
     return points, dist_vec
 
+# Matplotlib 인터랙티브 모드 활성화
+# plt.ion()
+# fig = plt.figure()
+# ax = fig.add_subplot(111, projection='3d')
+
+# # 초기 그래프 설정
+# def initialize_plot():
+#     ax.set_xlim([-1, 1])
+#     ax.set_ylim([-1, 1])
+#     ax.set_zlim([-1, 1])
+#     ax.set_xlabel('X')
+#     ax.set_ylabel('Y')
+#     ax.set_zlabel('Z')
+#     ax.legend()
+#     ax.grid()
+
 # et 값과 시간을 저장할 리스트
 et_values = []
 et_x_values = []
@@ -193,13 +207,6 @@ ax.set_ylabel("Error(m)")
 ax.set_title("Error Reduction Over Time")
 ax.legend()
 ax.grid()
-
-# # Distant Light 생성
-# create_prim(
-#     prim_path="/World/MyDistantLight",
-#     prim_type="DistantLight",
-#     position=[0.0, 0.0, 5.0],  # 위치는 사실 distant light에선 큰 영향 없음   
-# )
 
 step_count = 0
 
@@ -438,6 +445,22 @@ g_vec_f = None
 len_cable = 0.03
 w_obs = 0.005
 
+def set_orientation_from_vector(vector):
+    """
+    원기둥의 방향을 주어진 벡터에 맞게 설정합니다.
+    """
+    # 벡터를 정규화
+    vector = vector / np.linalg.norm(vector)
+
+    # 기본 z축(0, 0, 1)과 주어진 벡터 사이의 회전 행렬 계산
+    z_axis = np.array([0, 0, 1])
+    rotation_axis = np.cross(z_axis, vector)
+    rotation_angle = np.arccos(np.clip(np.dot(z_axis, vector), -1.0, 1.0))
+    rotation_matrix = R.from_rotvec(rotation_axis * rotation_angle).as_matrix()
+
+    return rotation_matrix
+ 
+
 while simulation_app.is_running():
     world.step(render=True)
     if world.is_playing():
@@ -576,10 +599,13 @@ while simulation_app.is_running():
                 T_e = T_cur  # 월드 좌표계에서 엔드 이펙터 좌표계로의 변환
 
                 # robot_target_position을 엔드 이펙터 좌표계로 변환
-                robot_target_position_homogeneous = np.append(robot_target_position, 1)  # 동차 좌표로 확장
+                # robot_target_position_homogeneous = np.append(robot_target_position, 1)  # 동차 좌표로 확장
+                robot_target_position_homogeneous = np.append(human_position, 1)  # 동차 좌표로 확장
                 robot_target_position_local = np.linalg.inv(T_e) @ robot_target_position_homogeneous
                 robot_target_position_local = robot_target_position_local[:3]  # 3차원으로 변환
-
+                cur_ee = T_e[:3,3]
+                sight_vec = human_position - cur_ee
+                sight_vec /= np.linalg.norm(sight_vec)
                 # 현재 엔드 이펙터 위치를 엔드 이펙터 좌표계로 변환 (항상 원점)
 
                 # 목표 방향 계산 (엔드 이펙터 좌표계 기준)
@@ -587,14 +613,14 @@ while simulation_app.is_running():
                 direction_vector /= np.linalg.norm(direction_vector)  # 방향 벡터 정규화
 
                 # 로봇의 현재 x축 방향 (엔드 이펙터의 x축)
-                current_x_axis = T_e[:3, 0]  # 엔드 이펙터 변환 행렬의 첫 번째 열
+                current_x_axis = T_e[:3, 1]  # 엔드 이펙터 변환 행렬의 첫 번째 열
 
                 # 엔드 이펙터 기준의 방향 벡터 (direction_vector)를 월드 좌표계로 변환
                 direction_vector_homogeneous = np.append(direction_vector, 0)  # 방향 벡터는 동차 좌표로 확장 (위치가 아니므로 마지막 값은 0)
                 direction_vector_world = T_e[:3, :3] @ direction_vector_homogeneous[:3]  # 회전 행렬만 적용하여 월드 좌표계로 변환
 
                 # z_axis를 월드 좌표계 기준으로 설정
-                z_axis = direction_vector_world / np.linalg.norm(direction_vector_world)  # 정규화
+                z_axis = sight_vec #direction_vector_world / np.linalg.norm(direction_vector_world)  # 정규화
 
                 # y축은 현재 x축 방향과 z축의 외적
                 y_axis = np.cross(current_x_axis, z_axis)
@@ -621,29 +647,64 @@ while simulation_app.is_running():
                 cur_p = human_sphere.get_world_pose()[0]
                 cur_dp = desired_sphere.get_world_pose()[0]
                 d_vec = cur_p - cur_dp  # 현재 위치와 목표 위치 간의 벡터
-                print('d_vec:', d_vec)
+                # print('d_vec:', d_vec)
                 d_vec_norm = np.linalg.norm(d_vec)  # 벡터의 크기
                 d_vec_unit = d_vec / d_vec_norm if d_vec_norm != 0 else np.zeros_like(d_vec)
-                if g_vec_f is not None:
-                    print('g_vec_f:', g_vec_f)
-                    # g_vec_f가 None이 아닐 때만 사용
-                    # T_sd[0, 3] = cur_dp[0] + d_vec_unit[0] * len_cable #human_error[0] * taken_t / moving_t  # 목표 x 위치
-                    # T_sd[1, 3] = cur_dp[1] + d_vec_unit[1] * len_cable #human_error[1] * taken_t / moving_t  # 목표 y 위치
-                    # T_sd[2, 3] = cur_dp[2] + d_vec_unit[2] * len_cable
-                    T_sd[0, 3] = cur_dp[0] + g_vec_f[0] * w_obs + d_vec_unit[0] * len_cable
-                    T_sd[1, 3] = cur_dp[1] + g_vec_f[1] * w_obs + d_vec_unit[1] * len_cable
-                    T_sd[2, 3] = cur_dp[2] + g_vec_f[2] * w_obs + d_vec_unit[2] * len_cable
-                else:
-                    T_sd[0, 3] = cur_dp[0] + d_vec_unit[0] * len_cable #human_error[0] * taken_t / moving_t  # 목표 x 위치
-                    T_sd[1, 3] = cur_dp[1] + d_vec_unit[1] * len_cable #human_error[1] * taken_t / moving_t  # 목표 y 위치
-                    T_sd[2, 3] = cur_dp[2] + d_vec_unit[2] * len_cable
-                # T_sd[0, 3] = robot_target_position[0] #robot_target_position[0]
-                # T_sd[1, 3] = robot_target_position[1] #robot_target_position[1]
-                # T_sd[2, 3] = robot_target_position[2] #robot_target_position[2]
+                # if g_vec_f is not None:
+                #     # print('g_vec_f:', g_vec_f)
+                #     # g_vec_f가 None이 아닐 때만 사용
+                #     # T_sd[0, 3] = cur_dp[0] + d_vec_unit[0] * len_cable #human_error[0] * taken_t / moving_t  # 목표 x 위치
+                #     # T_sd[1, 3] = cur_dp[1] + d_vec_unit[1] * len_cable #human_error[1] * taken_t / moving_t  # 목표 y 위치
+                #     # T_sd[2, 3] = cur_dp[2] + d_vec_unit[2] * len_cable
+                #     T_sd[0, 3] = cur_dp[0] + g_vec_f[0] * w_obs + d_vec_unit[0] * len_cable
+                #     T_sd[1, 3] = cur_dp[1] + g_vec_f[1] * w_obs + d_vec_unit[1] * len_cable
+                #     T_sd[2, 3] = cur_dp[2] + g_vec_f[2] * w_obs + d_vec_unit[2] * len_cable
+                # else:
+                #     T_sd[0, 3] = cur_dp[0] + d_vec_unit[0] * len_cable #human_error[0] * taken_t / moving_t  # 목표 x 위치
+                #     T_sd[1, 3] = cur_dp[1] + d_vec_unit[1] * len_cable #human_error[1] * taken_t / moving_t  # 목표 y 위치
+                #     T_sd[2, 3] = cur_dp[2] + d_vec_unit[2] * len_cable
+                T_sd[0, 3] = robot_target_position[0] #robot_target_position[0]
+                T_sd[1, 3] = robot_target_position[1] #robot_target_position[1]
+                T_sd[2, 3] = robot_target_position[2] #robot_target_position[2]
                 desired_sphere.set_world_pose(T_sd[:3, 3])  # 목표 위치 업데이트
                 # 마지막 업데이트 시간 기록
                 last_update_time = current_time
-       
+            # 엔드 이펙터의 z축 방향 벡터
+            z_axis = T_cur[:3, 0]  # T_cur의 회전 행렬에서 z축 방향 벡터
+
+            # T_cur에서 T_sd로 향하는 단위 벡터
+            direction_vector = human_position - T_cur[:3, 3]  # T_cur에서 T_sd로 향하는 벡터
+            direction_unit_vector = direction_vector / np.linalg.norm(direction_vector)  # 단위 벡터
+
+            # 두 벡터 사이의 각도 계산
+            cos_theta = np.dot(z_axis, direction_unit_vector)  # 내적 계산
+            theta = np.arccos(np.clip(cos_theta, -1.0, 1.0))  # 각도 계산 (라디안)
+            # 그래프 초기화
+            # ax.cla()
+            # initialize_plot()
+
+            # # 원점
+            # origin = T_cur[:3, 3]
+
+            # # z_axis 벡터 그리기
+            # ax.quiver(origin[0], origin[1], origin[2],
+            #         z_axis[0], z_axis[1], z_axis[2],
+            #         color='r', label='z_axis (T_cur)', length=1.0, normalize=True)
+
+            # # direction_unit_vector 벡터 그리기
+            # ax.quiver(origin[0], origin[1], origin[2],
+            #         direction_unit_vector[0], direction_unit_vector[1], direction_unit_vector[2],
+            #         color='b', label='direction_unit_vector (T_cur -> T_sd)', length=1.0, normalize=True)
+
+            # # 각도 텍스트 표시
+            # ax.text(origin[0], origin[1], origin[2], f"Angle: {np.degrees(theta):.2f}°", color='black')
+
+            # # 그래프 업데이트
+            # plt.draw()
+            # plt.pause(0.001)
+
+            print(f"Angle between z_axis and direction_unit_vector: {np.degrees(theta):.2f} degrees")
+            
             num_points=10
             points_between, dist_vec = generate_points_between_positions(cur_p, human_position, num_points, T_e)
             # points_between에 있는 점들을 월드 좌표계로 변환하고 구를 생성
@@ -825,6 +886,7 @@ while simulation_app.is_running():
                 first_plot = False
 
             C = np.concatenate((np.zeros(2), 8.0*J_m.reshape((n_dof - 2,)), np.zeros(6)))
+            # print("C before:", C.shape)
             bTe = ur5e_robot.fkine(q[2:], include_base=False).A  
             θε = atan2(bTe[1, -1], bTe[0, -1])
             weight_param = np.sum(np.abs(human_goal_position - T_e[:3, 3]))
@@ -856,7 +918,7 @@ while simulation_app.is_running():
 
             # Angular error
             e[3:] = base.tr2rpy(eTep, unit="rad", order="zyx", check=False)
-            print(f"e: {e}")
+            # print(f"e: {e}")
             k = np.eye(6)  # gain
             k[:3,:] *= 8.0 # gain
             v = k @ e
@@ -864,27 +926,27 @@ while simulation_app.is_running():
 
             lb = -np.r_[qdlim[: n_dof], 10 * np.ones(6)]
             ub = np.r_[qdlim[: n_dof], 10 * np.ones(6)]
-            # print(f"Qshape: {Q.shape}, C shape: {C.shape}, A shape: {A.shape}, B shape: {B.shape}, J_ shape: {J_.shape}, v shape: {v.shape}, lb shape: {lb.shape}, ub shape: {ub.shape}")
-            qd = qp.solve_qp(Q,C,A,B,J_,v,lb=lb, ub=ub, solver='quadprog')
-            # x_ = cp.Variable(n_dof+6) 
+            # qd = qp.solve_qp(Q,C,A,B,J_,v,lb=lb, ub=ub, solver='quadprog')
+            
+            x_ = cp.Variable(n_dof+6) 
 
-            # # 5. 목적함수
-            # objective = cp.Minimize(0.5 * cp.quad_form(x_, Q) + C.T @ x_)
-            # # 예시 제약조건 (속도 제한 등)
-            # constraints = [
-            #     x_ >= lb,
-            #     x_ <= ub,
-            #     # cp.abs(s) <= 0.1,  # 슬랙이 너무 커지는 걸 방지 (선택 사항)
-            #     A @ x_ <= B,  # 예시 제약조건 (속도 제한 등)
-            #     J_ @ x_ == v,  # 엔드이펙터 속도 추종
-            # ]
+            # 5. 목적함수
+            objective = cp.Minimize(0.5 * cp.quad_form(x_, Q) + C.T @ x_ + 0.5 * np.degrees(theta))
+            # 예시 제약조건 (속도 제한 등)
+            constraints = [
+                x_ >= lb,
+                x_ <= ub,
+                # cp.abs(s) <= 0.1,  # 슬랙이 너무 커지는 걸 방지 (선택 사항)
+                A @ x_ <= B,  # 예시 제약조건 (속도 제한 등)
+                J_ @ x_ == v,  # 엔드이펙터 속도 추종
+            ]
 
-            # # 풀기
-            # prob = cp.Problem(objective, constraints)
-            # prob.solve()
+            # 풀기
+            prob = cp.Problem(objective, constraints)
+            prob.solve()
 
             # 결과
-            # qd = x_.value
+            qd = x_.value
             
 
             if qd is None:
@@ -893,18 +955,10 @@ while simulation_app.is_running():
 
             if et > 0.5:
                 qd = qd[: n_dof]
-                # qd = 2 * qd
-                # qd[:2] = 2 * qd[:2] 
             elif 0.5 > et > 0.2 : 
                 qd = qd[: n_dof]
-                # qd = 1.5 * qd
             else:
                 qd = qd[: n_dof]
-                # qd[:2] = 0.5 * qd[:2] 
-
-                # qd[2:] = 0.5 * qd[2:]  # UR5e 조인트 속도 증가
-                # qd = 0.5 * qd
-                print("et:", et)
             qd = qd[:8]
             if human_trajectory_index >= len(robot_trajectory["x"]) - 1:
                 if et < 0.03:
@@ -972,7 +1026,6 @@ while simulation_app.is_running():
 
 
             wc, vc = qd[0], qd[1]  # 베이스 속도
-            # wc *= 2.0
 
             r_m = 0.165
             l_m = 0.582

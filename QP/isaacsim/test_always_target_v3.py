@@ -7,11 +7,8 @@ simulation_app = SimulationApp({"headless": False})
 
 
 from isaacsim.core.utils.nucleus import get_assets_root_path
-# from omni.isaac.core.utils.stage import update_stage
 from isaacsim.core.api import World, SimulationContext
-from isaacsim.core.api.objects import DynamicCylinder, VisualSphere
-# from isaacsim.core.api.materials import PhysicsMaterial
-# from isaacsim.cortex.framework.robot import CortexUr10
+from isaacsim.core.api.objects import DynamicCylinder, VisualSphere, VisualCylinder
 from isaacsim.robot.manipulators.grippers import ParallelGripper
 from isaacsim.core.utils.stage import add_reference_to_stage
 from isaacsim.core.prims import Articulation, XFormPrim
@@ -33,6 +30,7 @@ import matplotlib.pyplot as plt
 import random
 from RRTPlanner2 import RealTime3DTrajectoryPlanner
 import cvxpy as cp
+from mpl_toolkits.mplot3d import Axes3D
 
 
 # # 실제 UR5e 로봇의 DH 파라미터 정의
@@ -167,13 +165,29 @@ def generate_points_between_positions(start_pos, end_pos, num_points=10, T_e = N
     # dist_vec_local = np.linalg.inv(T)[:3,:3] @ dist_vec
     return points, dist_vec
 
+# Matplotlib 인터랙티브 모드 활성화
+# plt.ion()
+# fig = plt.figure()
+# ax = fig.add_subplot(111, projection='3d')
+
+# # 초기 그래프 설정
+# def initialize_plot():
+#     ax.set_xlim([-1, 1])
+#     ax.set_ylim([-1, 1])
+#     ax.set_zlim([-1, 1])
+#     ax.set_xlabel('X')
+#     ax.set_ylabel('Y')
+#     ax.set_zlabel('Z')
+#     ax.legend()
+#     ax.grid()
+
 # et 값과 시간을 저장할 리스트
 et_values = []
 et_x_values = []
 et_y_values = []
 et_z_values = []
 time_values = []
-
+theta_values = []
 
 # Matplotlib 인터랙티브 모드 활성화
 # plt.ion()
@@ -193,13 +207,6 @@ ax.set_ylabel("Error(m)")
 ax.set_title("Error Reduction Over Time")
 ax.legend()
 ax.grid()
-
-# # Distant Light 생성
-# create_prim(
-#     prim_path="/World/MyDistantLight",
-#     prim_type="DistantLight",
-#     position=[0.0, 0.0, 5.0],  # 위치는 사실 distant light에선 큰 영향 없음   
-# )
 
 step_count = 0
 
@@ -422,7 +429,7 @@ H_desired = None
 
 # collision avoidance parameters
 d_safe = 0.2
-d_influence = 2.0
+d_influence = 1.5
 
 # moving human
 moving_t = 30.0  # 이동 시간
@@ -434,9 +441,21 @@ T_robot = None  # 로봇의 현재 위치를 저장할 변수
 last_update_time = None
 update_interval = 0.1  # 업데이트 간격 (초)
 
-g_vec_f = None
-len_cable = 0.03
-w_obs = 0.005
+def set_orientation_from_vector(vector):
+    """
+    원기둥의 방향을 주어진 벡터에 맞게 설정합니다.
+    """
+    # 벡터를 정규화
+    vector = vector / np.linalg.norm(vector)
+
+    # 기본 z축(0, 0, 1)과 주어진 벡터 사이의 회전 행렬 계산
+    z_axis = np.array([0, 0, 1])
+    rotation_axis = np.cross(z_axis, vector)
+    rotation_angle = np.arccos(np.clip(np.dot(z_axis, vector), -1.0, 1.0))
+    rotation_matrix = R.from_rotvec(rotation_axis * rotation_angle).as_matrix()
+
+    return rotation_matrix
+ 
 
 while simulation_app.is_running():
     world.step(render=True)
@@ -576,10 +595,13 @@ while simulation_app.is_running():
                 T_e = T_cur  # 월드 좌표계에서 엔드 이펙터 좌표계로의 변환
 
                 # robot_target_position을 엔드 이펙터 좌표계로 변환
-                robot_target_position_homogeneous = np.append(robot_target_position, 1)  # 동차 좌표로 확장
+                # robot_target_position_homogeneous = np.append(robot_target_position, 1)  # 동차 좌표로 확장
+                robot_target_position_homogeneous = np.append(human_position, 1)  # 동차 좌표로 확장
                 robot_target_position_local = np.linalg.inv(T_e) @ robot_target_position_homogeneous
                 robot_target_position_local = robot_target_position_local[:3]  # 3차원으로 변환
-
+                cur_ee = T_e[:3,3]
+                sight_vec = human_position - cur_ee
+                sight_vec /= np.linalg.norm(sight_vec)
                 # 현재 엔드 이펙터 위치를 엔드 이펙터 좌표계로 변환 (항상 원점)
 
                 # 목표 방향 계산 (엔드 이펙터 좌표계 기준)
@@ -587,14 +609,14 @@ while simulation_app.is_running():
                 direction_vector /= np.linalg.norm(direction_vector)  # 방향 벡터 정규화
 
                 # 로봇의 현재 x축 방향 (엔드 이펙터의 x축)
-                current_x_axis = T_e[:3, 0]  # 엔드 이펙터 변환 행렬의 첫 번째 열
+                current_x_axis = T_e[:3, 1]  # 엔드 이펙터 변환 행렬의 첫 번째 열
 
                 # 엔드 이펙터 기준의 방향 벡터 (direction_vector)를 월드 좌표계로 변환
                 direction_vector_homogeneous = np.append(direction_vector, 0)  # 방향 벡터는 동차 좌표로 확장 (위치가 아니므로 마지막 값은 0)
                 direction_vector_world = T_e[:3, :3] @ direction_vector_homogeneous[:3]  # 회전 행렬만 적용하여 월드 좌표계로 변환
 
                 # z_axis를 월드 좌표계 기준으로 설정
-                z_axis = direction_vector_world / np.linalg.norm(direction_vector_world)  # 정규화
+                z_axis = sight_vec #direction_vector_world / np.linalg.norm(direction_vector_world)  # 정규화
 
                 # y축은 현재 x축 방향과 z축의 외적
                 y_axis = np.cross(current_x_axis, z_axis)
@@ -621,29 +643,28 @@ while simulation_app.is_running():
                 cur_p = human_sphere.get_world_pose()[0]
                 cur_dp = desired_sphere.get_world_pose()[0]
                 d_vec = cur_p - cur_dp  # 현재 위치와 목표 위치 간의 벡터
-                print('d_vec:', d_vec)
+                # print('d_vec:', d_vec)
                 d_vec_norm = np.linalg.norm(d_vec)  # 벡터의 크기
                 d_vec_unit = d_vec / d_vec_norm if d_vec_norm != 0 else np.zeros_like(d_vec)
-                if g_vec_f is not None:
-                    print('g_vec_f:', g_vec_f)
-                    # g_vec_f가 None이 아닐 때만 사용
-                    # T_sd[0, 3] = cur_dp[0] + d_vec_unit[0] * len_cable #human_error[0] * taken_t / moving_t  # 목표 x 위치
-                    # T_sd[1, 3] = cur_dp[1] + d_vec_unit[1] * len_cable #human_error[1] * taken_t / moving_t  # 목표 y 위치
-                    # T_sd[2, 3] = cur_dp[2] + d_vec_unit[2] * len_cable
-                    T_sd[0, 3] = cur_dp[0] + g_vec_f[0] * w_obs + d_vec_unit[0] * len_cable
-                    T_sd[1, 3] = cur_dp[1] + g_vec_f[1] * w_obs + d_vec_unit[1] * len_cable
-                    T_sd[2, 3] = cur_dp[2] + g_vec_f[2] * w_obs + d_vec_unit[2] * len_cable
-                else:
-                    T_sd[0, 3] = cur_dp[0] + d_vec_unit[0] * len_cable #human_error[0] * taken_t / moving_t  # 목표 x 위치
-                    T_sd[1, 3] = cur_dp[1] + d_vec_unit[1] * len_cable #human_error[1] * taken_t / moving_t  # 목표 y 위치
-                    T_sd[2, 3] = cur_dp[2] + d_vec_unit[2] * len_cable
-                # T_sd[0, 3] = robot_target_position[0] #robot_target_position[0]
-                # T_sd[1, 3] = robot_target_position[1] #robot_target_position[1]
-                # T_sd[2, 3] = robot_target_position[2] #robot_target_position[2]
+ 
+                T_sd[0, 3] = robot_target_position[0] #robot_target_position[0]
+                T_sd[1, 3] = robot_target_position[1] #robot_target_position[1]
+                T_sd[2, 3] = robot_target_position[2] #robot_target_position[2]
                 desired_sphere.set_world_pose(T_sd[:3, 3])  # 목표 위치 업데이트
                 # 마지막 업데이트 시간 기록
                 last_update_time = current_time
-       
+            # 엔드 이펙터의 z축 방향 벡터
+            z_axis = T_cur[:3, 0]  # T_cur의 회전 행렬에서 z축 방향 벡터
+
+            # T_cur에서 T_sd로 향하는 단위 벡터
+            direction_vector = human_position - T_cur[:3, 3]  # T_cur에서 T_sd로 향하는 벡터
+            direction_unit_vector = direction_vector / np.linalg.norm(direction_vector)  # 단위 벡터
+
+            # 두 벡터 사이의 각도 계산
+            cos_theta = np.dot(z_axis, direction_unit_vector)  # 내적 계산
+            theta = np.arccos(np.clip(cos_theta, -1.0, 1.0))  # 각도 계산 (라디안)
+            theta_values.append(np.degrees(theta))
+           
             num_points=10
             points_between, dist_vec = generate_points_between_positions(cur_p, human_position, num_points, T_e)
             # points_between에 있는 점들을 월드 좌표계로 변환하고 구를 생성
@@ -671,7 +692,6 @@ while simulation_app.is_running():
 
             points_world = np.array(points_world)  # (num_points, 3) 형태로 변환
             xform_pose = np.vstack((xform_pose, points_world))  # 현재 xform_pose에 점 추가
-
             T_bd = np.linalg.inv(T_sb) @ T_sd  
             # print("T_bd:", T_bd)
             # print("T_bd shape:", T_bd.shape)
@@ -700,17 +720,30 @@ while simulation_app.is_running():
             et = np.sum(np.abs(T_error[:3, -1])) 
 
             # Gain term (lambda) for control minimisation
-            Y = 100
+            # Y = 0.08
 
             # Quadratic component of objective function
             Q = np.eye(n_dof + 6)
 
             # Joint velocity component of Q
-            Q[:2, :2] *= 1.0 / (et*100)
+            Q[:2, :2] *= 1.0 / (et * 100)
+            # Q[2: n_dof, 2: n_dof] *= 1.5
+            # 모바일 로봇의 현재 위치와 목표 위치 비교
+            # distance_to_target = np.linalg.norm(T_sd[:2, 3] - T_sb[:2, 3])  # x, y 좌표 거리 계산
+            # print('distance_to_target:', distance_to_target)
+            # if distance_to_target < 0.7:
+            #     # 모바일 로봇이 목표 위치에 가까운 경우
+            #     # Q[:2, :2] = 1.0  # 모바일 로봇의 Q 값을 고정
+            #     Q[2: n_dof, 2: n_dof] *= 1.0 / (et * 100)  #로봇 팔의 Q 값 조정
+            # else:
+            #     # 모바일 로봇이 목표 위치에서 먼 경우
+            #     Q[:2, :2] *= 1.0 / (et * 100)  # 모바일 로봇의 Q 값 조정
+                
 
             # Slack component of Q
-            Q[n_dof :, n_dof :] = (1.0 / et) * np.eye(6)
-
+            # Q[2: n_dof, 2: n_dof] *= 1.5
+            Q[n_dof :, n_dof :] = (1. / et) * np.eye(6)
+            # Q[n_dof :, n_dof :] *= Y
             H = np.zeros((n_dof-2, 6, n_dof-2))  # same as jacobm
 
             for j in range(n_dof-2):
@@ -742,7 +775,6 @@ while simulation_app.is_running():
 
             A = np.zeros((n_dof + 2 + num_points, n_dof + 6))
             B = np.zeros(n_dof + 2 + num_points)
-            # print(f"Ashape: {A.shape}, B shape: {B.shape}")
             
             J_dj = np.zeros(n_dof+6)
             w_p_sum = 0.0
@@ -750,10 +782,14 @@ while simulation_app.is_running():
             for i , pose in enumerate(xform_pose) :
 
                 distance, index, g_vec = get_nearest_obstacle_distance(pose, obstacles_positions[:, :3], obstacle_radius, T_cur)
-                min_dist = np.min(distance)
-                min_dist_list.append(min_dist)  # 최소 거리 추가
-                # print('min_dist', min_dist)
-                
+                min_dist_ = np.min(distance)
+                min_dist_list.append(min_dist_)  # 최소 거리 추가
+            
+            # print('min_dist', min_dist_list)
+            min_dist = np.min(min_dist_list)
+            # print('min_dist overall:', min_dist)
+
+            for i , pose in enumerate(xform_pose) :    
                 if i < 4:  # mobile base wheels
                 
                     position_homogeneous = np.append(pose, 1)  # 동차 좌표로 확장
@@ -789,7 +825,7 @@ while simulation_app.is_running():
                     A[i, 8:] = np.zeros((1, 6)) 
                     B[i] = (min_dist - d_safe) / (d_influence - d_safe)
                     w_p = (d_influence-min_dist)/(d_influence-d_safe) 
-                    J_dj[:8] += A[i, :8] * w_p  # 베이스 조인트 속도에 대한 제약 조건
+                    J_dj[:8] += A[i, :8] * w_p * 0.5 # 베이스 조인트 속도에 대한 제약 조건
                     w_p_sum += w_p
 
 
@@ -815,35 +851,32 @@ while simulation_app.is_running():
 
                     J_dj[:8] += A[i, :8] * w_p  # 베이스 조인트 속도에 대한 제약 조건
                     w_p_sum += w_p
-            # print(f"Ashape: {A.shape}, B shape: {B.shape}")
-            g_vec_f = g_vec
             # 그래프 표시
             if first_plot:
                 # 그래프 저장
                 plt.savefig("first_simulation_environment_with_trajectories.png")
                 print("Graph saved as 'first_simulation_environment_with_trajectories.png'")
                 first_plot = False
-
-            C = np.concatenate((np.zeros(2), 8.0*J_m.reshape((n_dof - 2,)), np.zeros(6)))
+            
             bTe = ur5e_robot.fkine(q[2:], include_base=False).A  
             θε = atan2(bTe[1, -1], bTe[0, -1])
             weight_param = np.sum(np.abs(human_goal_position - T_e[:3, 3]))
-            # weight = 0.8 * np.sum(np.abs(human_goal_position - T_e[:3, 3]))  # 목표 위치와 현재 위치의 차이
-            if weight_param < 0.5:
-                k_e = 1.0
-            else:
-                k_e = 6.0
-            # C[0] = - weight * θε  # 베이스 x 위치 오차
-            C[0] = - k_e * θε  # 베이스 x 위치 오차
-            # C *= weight
+           
+            C1 = np.concatenate((np.zeros(2), J_m.reshape((n_dof - 2,)), np.zeros(6)))
+            C2 = np.zeros(n_dof + 6)
+            C2[0] = - 3. * θε  # 베이스 x 위치 오차
 
             lambda_max = 0.32
             min_distance = np.min(min_dist_list)  # 장애물과의 최소 거리
             lambda_c = (lambda_max /(d_influence - d_safe)**2) * (min_distance - d_influence)**2
             J_c = lambda_c * J_dj/w_p_sum
-            # J_c = J_dj/w_p_sum
 
-            C += J_c # 베이스 조인트 속도에 대한 제약 조건 추가
+            C3 = J_c # 베이스 조인트 속도에 대한 제약 조건 추가
+            # print(f"c1: \\{C1},\\ c2: \\{C2}, \\ c3: \\{C3}")
+            C4 = np.zeros(n_dof + 6)
+            C4[4:] *= 10./np.degrees(theta) 
+
+            C = C1 + C2 + C3 + C4
             
             J_ = np.c_[J_mb, np.eye(6)]  # J_ 행렬 (예시)
 
@@ -856,36 +889,53 @@ while simulation_app.is_running():
 
             # Angular error
             e[3:] = base.tr2rpy(eTep, unit="rad", order="zyx", check=False)
-            print(f"e: {e}")
+            # print(f"e: {e}")
             k = np.eye(6)  # gain
-            k[:3,:] *= 8.0 # gain
+            k[:3,:] *= 4.0 # gain
             v = k @ e
-            v[3:] *= 1.3
+            # v = e   #* 10.0
 
             lb = -np.r_[qdlim[: n_dof], 10 * np.ones(6)]
             ub = np.r_[qdlim[: n_dof], 10 * np.ones(6)]
-            # print(f"Qshape: {Q.shape}, C shape: {C.shape}, A shape: {A.shape}, B shape: {B.shape}, J_ shape: {J_.shape}, v shape: {v.shape}, lb shape: {lb.shape}, ub shape: {ub.shape}")
-            qd = qp.solve_qp(Q,C,A,B,J_,v,lb=lb, ub=ub, solver='quadprog')
-            # x_ = cp.Variable(n_dof+6) 
-
-            # # 5. 목적함수
-            # objective = cp.Minimize(0.5 * cp.quad_form(x_, Q) + C.T @ x_)
-            # # 예시 제약조건 (속도 제한 등)
-            # constraints = [
-            #     x_ >= lb,
-            #     x_ <= ub,
-            #     # cp.abs(s) <= 0.1,  # 슬랙이 너무 커지는 걸 방지 (선택 사항)
-            #     A @ x_ <= B,  # 예시 제약조건 (속도 제한 등)
-            #     J_ @ x_ == v,  # 엔드이펙터 속도 추종
-            # ]
-
-            # # 풀기
-            # prob = cp.Problem(objective, constraints)
-            # prob.solve()
+            # qd = qp.solve_qp(Q,C,A,B,J_,v,lb=lb, ub=ub, solver='quadprog')
+            
+            x_ = cp.Variable(n_dof+6) 
+            err_default_q = np.abs(current_joint_positions[4:10] - target_joint_positions[4:10])
+            # 5. 목적함수
+            objective = cp.Minimize(0.5 * cp.quad_form(x_, Q) + C.T @ x_ ) # + 3 * theta ) # + 10. * err_default_q.sum())
+            # 예시 제약조건 (속도 제한 등)
+            constraints = [
+                x_ >= lb,
+                x_ <= ub,
+                # cp.abs(s) <= 0.1,  # 슬랙이 너무 커지는 걸 방지 (선택 사항)
+                A @ x_ <= B,  # 예시 제약조건 (속도 제한 등)
+                J_ @ x_ == v,  # 엔드이펙터 속도 추종
+            ]
+            # 풀기
+            prob = cp.Problem(objective, constraints)
+            prob.solve(solver=cp.ECOS)
 
             # 결과
-            # qd = x_.value
+            qd = x_.value
             
+            if x_.value is not None:
+                quad_term = 0.5 * np.dot(x_.value.T, Q @ x_.value)  # 이차항
+                linear_term = np.dot(C.T, x_.value)  # 선형항
+                # theta_term = 3*theta  # 추가 항목
+
+                print(f"Quadratic term: {quad_term}")
+                print(f"Linear term: {linear_term}")
+                # print(f"Theta term: {theta_term}")
+
+            #     # 제약 조건의 dual value 확인
+            #     for i, constraint in enumerate(constraints):
+            #         if constraint.dual_value is not None:
+            #             print(f"Constraint {i} dual value: {constraint.dual_value}")
+            #         else:
+            #             print(f"Constraint {i} has no dual value.")
+            # else:
+            #     print("Optimization failed. No solution found.")
+
 
             if qd is None:
                 print("QP solution is None")
@@ -893,18 +943,10 @@ while simulation_app.is_running():
 
             if et > 0.5:
                 qd = qd[: n_dof]
-                # qd = 2 * qd
-                # qd[:2] = 2 * qd[:2] 
             elif 0.5 > et > 0.2 : 
                 qd = qd[: n_dof]
-                # qd = 1.5 * qd
             else:
                 qd = qd[: n_dof]
-                # qd[:2] = 0.5 * qd[:2] 
-
-                # qd[2:] = 0.5 * qd[2:]  # UR5e 조인트 속도 증가
-                # qd = 0.5 * qd
-                print("et:", et)
             qd = qd[:8]
             if human_trajectory_index >= len(robot_trajectory["x"]) - 1:
                 if et < 0.03:
@@ -950,7 +992,7 @@ while simulation_app.is_running():
             # x축 및 y축 범위 동적 업데이트
             ax.set_xlim(0, max(10, current_time))
             ax.set_ylim(0, max(1, max(et_values) * 1.1))
-            if human_trajectory_index >= len(robot_trajectory["x"]) - 1 and et < 0.03:
+            if human_trajectory_index >= len(robot_trajectory["x"]) - 1 and et < 0.05:
                 # 첫 번째 그래프 저장 (Error Reduction Graph)
                 plt.figure(figsize=(10, 6))
                 plt.plot(time_values, et_values, label="Total Error (et)", color="blue")
@@ -966,13 +1008,25 @@ while simulation_app.is_running():
                 plt.savefig("error_reduction_graph_.png")
                 print("Graph saved as 'error_reduction_graph_.png'")
                 plt.close()  # 그래프를 닫아 다음 그래프와 겹치지 않도록 함
-                 # 시뮬레이션 종료
+                
+                # 두 번째 그래프 저장 (Theta Over Time)
+                plt.figure(figsize=(10, 6))
+                plt.plot(time_values, theta_values, label="Theta (degrees)", color="purple")
+                plt.xlabel("Simulation Time (s)")
+                plt.ylabel("Theta (degrees)")
+                plt.title("Theta Over Time")
+                plt.legend()
+                plt.grid()
+                plt.savefig("theta_over_time_graph.png")
+                print("Graph saved as 'theta_over_time_graph.png'")
+                plt.close()  # 그래프를 닫아 다음 그래프와 겹치지 않도록 함
+                
+                # 시뮬레이션 종료
                 simulation_app.close()
                 break
 
 
             wc, vc = qd[0], qd[1]  # 베이스 속도
-            # wc *= 2.0
 
             r_m = 0.165
             l_m = 0.582
