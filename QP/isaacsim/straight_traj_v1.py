@@ -693,7 +693,7 @@ while simulation_app.is_running():
             Q = np.eye(n_dof + 6)
 
             # Joint velocity component of Q
-            Q[:2, :2] *= 1.0 / (et * 100)
+            Q[:2, :2] *= 1.0 / (et * 1000)
 
 
             Q[n_dof :, n_dof :] = (1. / et) * np.eye(6)

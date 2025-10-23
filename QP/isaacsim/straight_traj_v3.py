@@ -231,8 +231,8 @@ rho_i = 0.9 # influence distance
 rho_s = 0.1  # safety factor
 eta = 1
 qdlim = np.array([0.3]*8)
-qdlim[:1] = 0.5  # 베이스 조인트 속도 제한
-qdlim[1] = 0.25
+qdlim[:1] = 0.25  # 베이스 조인트 속도 제한
+qdlim[1] = 0.15
 qlim = np.array([[-np.inf, -np.inf, -3.14159265, -3.14159265, -3.14159265, -3.14159265, -3.14159265, -3.14159265],
                                [ np.inf, np.inf, 3.14159265,  3.14159265,  3.14159265,  3.14159265,  3.14159265,  3.14159265]])
 
@@ -628,8 +628,11 @@ while simulation_app.is_running():
                 rotation_matrix = np.vstack([z_axis, y_axis, x_axis]).T
                 
                 # 로봇의 목표 위치 설정
-                T_sd = np.eye(4)
-                T_sd[:3, :3] = rotation_matrix #T_ee[:3,:3] #rotation_matrix # T_er[:3, :3]  # 회전 행렬은 단위 행렬로 설정
+                # T_sd = np.eye(4)
+                # T_sd[:3, :3] = rotation_matrix #T_ee[:3,:3] #rotation_matrix # T_er[:3, :3]  # 회전 행렬은 단위 행렬로 설정
+                H_fix = np.eye(4)
+                H_fix[:3, 3] = [3.5,1.0,1]
+                H_fix[:3, :3] = rotation_matrix
                 det = np.linalg.det(rotation_matrix)
                 orthogonality_check = np.allclose(rotation_matrix.T @ rotation_matrix, np.eye(3))
 
@@ -645,10 +648,13 @@ while simulation_app.is_running():
                 d_vec_norm = np.linalg.norm(d_vec)  # 벡터의 크기
                 d_vec_unit = d_vec / d_vec_norm if d_vec_norm != 0 else np.zeros_like(d_vec)
  
-                T_sd[0, 3] = robot_target_position[0] #robot_target_position[0]
-                T_sd[1, 3] = robot_target_position[1] #robot_target_position[1]
-                T_sd[2, 3] = robot_target_position[2] #robot_target_position[2]
-                desired_sphere.set_world_pose(T_sd[:3, 3])  # 목표 위치 업데이트
+                # T_sd[0, 3] = robot_target_position[0] #robot_target_position[0]
+                # T_sd[1, 3] = robot_target_position[1] #robot_target_position[1]
+                # T_sd[2, 3] = robot_target_position[2] #robot_target_position[2]
+                
+        
+                
+                desired_sphere.set_world_pose(H_fix[:3, 3])  # 목표 위치 업데이트
                 # 마지막 업데이트 시간 기록
                 last_update_time = current_time
             # 엔드 이펙터의 z축 방향 벡터
@@ -663,7 +669,9 @@ while simulation_app.is_running():
             theta = np.arccos(np.clip(cos_theta, -1.0, 1.0))  # 각도 계산 (라디안)
             theta_values.append(np.degrees(theta))
 
-            T_bd = np.linalg.inv(T_sb) @ T_sd  
+            # T_bd = np.linalg.inv(T_sb) @ T_sd  
+            T_bd = np.linalg.inv(T_sb) @ H_fix  
+
 
             H_desired = SE3(T_bd)  # 목표 end-effector 위치
 
@@ -695,9 +703,10 @@ while simulation_app.is_running():
             Q = np.eye(n_dof + 6)
             T_err_mob = np.linalg.inv(T_mob) @ H_desired.A
             et_mob = np.sum(np.abs(T_err_mob[:3, -1]))
-            print('et_mob:', et_mob)
-            print("Q.shape:", Q.shape)
+            # print('et_mob:', et_mob)
+            # print("Q.shape:", Q.shape)
             print("et:", et)
+            print("et_mob:", et_mob)
             # Joint velocity component of Q
             Q[:2, :2] *= 1.0 / ((et_mob) * 1000000000)
             Q[2:n_dof, 2:n_dof] *= (et* 5)  # arm joint weight
@@ -752,7 +761,7 @@ while simulation_app.is_running():
             min_dist = np.min(min_dist_list)
             min_index = np.argmin(min_dist_list)
             g_vec = g_vec_list[min_index]
-            print('min_dist overall:', min_dist)
+            # print('min_dist overall:', min_dist)
             pose_closest = xform_pose[min_index]
             # g_vec의 시작점과 끝점 정의
             start_point = Float3(pose_closest)  # Float3 형식으로 변환
@@ -883,7 +892,7 @@ while simulation_app.is_running():
             C2 = np.zeros(n_dof + 6)
             C2[0] = - 5. * θε  # 베이스 x 위치 오차
 
-            lambda_max = 1.5
+            lambda_max = 15
             min_distance = np.min(min_dist_list)  # 장애물과의 최소 거리
             lambda_c = (lambda_max /(d_influence - d_safe)**2) * (min_distance - d_influence)**2
             J_c = lambda_c * J_dj#/w_p_sum
@@ -892,13 +901,13 @@ while simulation_app.is_running():
             C4 = np.concatenate((np.zeros(5), np.ones((n_dof - 5)), np.zeros(6)))
             # C4[4:] *= 1./np.abs(np.degrees(theta)) 
             epsilon = 1e-6  # 최소 허용 값
-            C4[4:] -= 1.5 / np.maximum(np.abs(np.degrees(theta)), epsilon)
+            # C4[4:] -= 1.5 / np.maximum(np.abs(np.degrees(theta)), epsilon)
             w1 = 0.2
-            w2 = 1.
-            w3 = 0.2
+            w2 = 0.2
+            w3 = 2.0
             w4 = 0.2
-            C = w1 * C1 + w2 * C2 + w3 * C3 + w4 * C4
-            print(C)
+            C = w1 * C1 + w2 * C2 + w3 * C3 #+ w4 * C4
+            # print(C)
             J_ = np.c_[J_mb, np.eye(6)]  # J_ 행렬 (예시)
 
             # w_traj = 0.01
@@ -912,18 +921,18 @@ while simulation_app.is_running():
             # H_avoid[1, 3] += avoidance_offset_base[1]
             # H_avoid[2, 3] += avoidance_offset_base[2]
             
-            # VisualSphere(
-            #     prim_path=f"/World/Xform/avoid",
-            #     name=f"avoid",
-            #     position=H_avoid[:3, 3],
-            #     radius=0.1,
-            #     color=np.array([0.8, 0.2, 0.2])
-            # )
+            
             H_fix = np.eye(4)
-            H_fix[:3, 3] = [2.5,0,1]
+            H_fix[:3, 3] = [3.5,1.0,1]
             H_fix_B = np.linalg.inv(T_sb) @ H_fix
             eTep = np.linalg.inv(T) @ H_fix_B  # 현재 위치에서의 오차 행렬
-
+            VisualSphere(
+                prim_path=f"/World/Xform/fix",
+                name=f"fix",
+                position=H_fix[:3, 3],
+                radius=0.1,
+                color=np.array([0.8, 0.2, 0.2])
+            )
             e = np.zeros(6)
 
             # Translational error
@@ -955,7 +964,7 @@ while simulation_app.is_running():
             ]
             # 풀기
             prob = cp.Problem(objective, constraints)
-            prob.solve(solver=cp.SCS)  # ECOS, OSQP, SCS, etc.
+            prob.solve(solver=cp.ECOS)  # ECOS, OSQP, SCS, etc.
 
             # 결과
             qd = x_.value
@@ -964,7 +973,7 @@ while simulation_app.is_running():
                 quad_term = 0.5 * np.dot(x_.value.T, Q @ x_.value)  # 이차항
                 linear_term = np.dot(C.T, x_.value)  # 선형항
                 # print(f"Cost function linear term C: { np.dot(C.T, x_.value)}, C1: { np.dot(C1.T , x_.value)}, C2: { np.dot(C2.T , x_.value)}, C3: { np.dot(C3.T , x_.value)}, C4: { np.dot(C4.T , x_.value)}")
-                print(f"Cost function linear term C: { np.dot(C.T, x_.value)}, C1: { np.dot(C1.T , x_.value)}, C2: { np.dot(C2.T , x_.value)}, C3: { np.dot(C3.T , x_.value)}")
+                # print(f"Cost function linear term C: { np.dot(C.T, x_.value)}, C1: { np.dot(C1.T , x_.value)}, C2: { np.dot(C2.T , x_.value)}, C3: { np.dot(C3.T , x_.value)}")
 
             scatter_x.append(T_e[0,3])
             scatter_y.append(T_e[1,3])
@@ -1069,7 +1078,7 @@ while simulation_app.is_running():
                 break
 
 
-            wc, vc = 2. * qd[0], qd[1]  # 베이스 속도
+            wc, vc = 4. * qd[0], qd[1]  # 베이스 속도
 
             r_m = 0.165
             l_m = 0.582
