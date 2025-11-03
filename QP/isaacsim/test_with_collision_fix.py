@@ -204,6 +204,8 @@ time_values = []
 theta_values = []
 scatter_x = []
 scatter_y = []
+scatter_mob_x = []
+scatter_mob_y = []
 
 # Matplotlib 인터랙티브 모드 활성화
 # plt.ion()
@@ -301,7 +303,7 @@ simulation_context = SimulationContext()
 #      [2.8, 0.5, 0.97],
 #      [2.5 , 2.5, 0.97]])
 obstacles_positions = np.array([
-     [1.25,0.5, 1.]])
+     [1.25,4.0, 1.]])
 
 # 사람의 경로를 부드럽게 만들기
 num_traj_points = 300
@@ -504,7 +506,8 @@ while simulation_app.is_running():
         x = mobile_base_pose[0][0]
         y = mobile_base_pose[0][1] 
         z = mobile_base_pose[0][2] 
-        
+        scatter_mob_x.append(x)
+        scatter_mob_y.append(y)
         quat = mobile_base_quat[0]
         r = R.from_quat([quat[1], quat[2], quat[3], quat[0]])
         euler = r.as_euler('zyx', degrees=False)  # 'zyx' 순서로 euler angles 추출
@@ -994,7 +997,7 @@ while simulation_app.is_running():
             if min_distance <= d_influence :
                 lambda_c = (lambda_max /(d_influence - d_safe)**2) * (min_distance - d_influence)**2
             else:
-                lambda_c = 1.0
+                lambda_c = 0.0
             J_c = lambda_c * J_dj/w_p_sum
             # print("w_p_sum:", w_p_sum)
             C3 = J_c # 베이스 조인트 속도에 대한 제약 조건 추가
@@ -1003,7 +1006,7 @@ while simulation_app.is_running():
             # epsilon = 1e-6  # 최소 허용 값
             # C4[4:] -= 1.5 / np.maximum(np.abs(np.degrees(theta)), epsilon)
             w1 = 0.2
-            w2 = 0.2
+            w2 = 0.05
             w3 = 0.2
             w4 = 0.2
             C = w1 * C1 + w2 * C2 + w3 * C3 #+ w4 * C4
@@ -1107,10 +1110,12 @@ while simulation_app.is_running():
                 print("Reached desired position!")
                 plt.scatter(scatter_x, scatter_y, color='orange', s=10, label="End-Effector Trajectory")
                 plt.scatter(H_fix[0,3], H_fix[1,3], color='blue', label="Robot Desired Position", s=100)
+                plt.scatter(scatter_mob_x, scatter_mob_y, color='yellow', s=10, label="Robot-Base Trajectory")
+
                 plt.legend()
                 
                 # 그래프 저장
-                plt.savefig("simulation_environment_with_obstacle_1.25,0.5,lambda_5.0_abs.png")
+                plt.savefig("simulation_environment_with_obstacle_1.5,4.0,lambda_5.0_.png")
                 print("Graph saved as 'simulation_environment_with_trajectories.png'")
                 plt.close()
                 # 첫 번째 그래프 저장 (Error Reduction Graph)
