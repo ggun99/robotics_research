@@ -1,0 +1,11 @@
+ros2 launch realsense2_camera rs_launch.py rgb_camera.profile:=640x480x30 pointcloud.enable:=false camera_namespace:=camera1 camera_name:=camera1 serial_no:=_102422072725
+/camera1/camera1/color/image_raw
+
+ros2 launch realsense2_camera rs_launch.py rgb_camera.profile:=640x480x30 pointcloud.enable:=false camera_namespace:=camera2 camera_name:=camera2 serial_no:=_048322070613
+/camera2/camera2/color/image_raw
+
+ros2 launch realsense2_camera rs_launch.py rgb_camera.profile:=640x480x30 pointcloud.enable:=false camera_namespace:=camera3 camera_name:=camera3 serial_no:=_109622073976
+/camera3/camera3/color/image_raw
+
+
+usb 2.1이면 15프레임 3.0이상이면 30프레임.
