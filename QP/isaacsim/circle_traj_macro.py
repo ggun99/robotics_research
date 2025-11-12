@@ -4,11 +4,11 @@ import sys
 import os
 
 # 파라미터 조합 정의
-w_values = [0.0, 0.2, 0.5, 1.0]  # w1, w2, w4에 사용할 값들
-lambda_h_a_values = [0.1, 0.3, 0.5]  # lambda_h_a에 사용할 값들
+w_values = [0.0,0.2,0.5,1.0]  # w1, w2, w4에 사용할 값들
+lambda_h_a_values = [0.1,0.3,0.5]  # lambda_h_a에 사용할 값들
 
 # 결과 저장 폴더 지정
-RESULTS_FOLDER = "circle_simulation_results_minus"  # 원하는 폴더명으로 변경 가능
+RESULTS_FOLDER = "circle_simulation_results_minus3"  # 원하는 폴더명으로 변경 가능
 
 def create_results_folder():
     """결과 저장용 폴더 생성"""
@@ -421,18 +421,21 @@ try:
                 qd = qd[:n_dof]
                 qd = qd[:8]
 
-                # 오차 값 저장
+                # 오차 값 저장 (첫 궤적 점에 도달한 후부터만)
                 current_time = world.current_time
                 et_x = abs(eTep[0, -1])
                 et_y = abs(eTep[1, -1])
                 et_z = abs(eTep[2, -1])
-                et = et_x + et_y + et_z
+                # et = et_x + et_y + et_z
+                et = np.linalg.norm(T_error[:3, -1])
 
-                et_values.append(et)
-                et_x_values.append(et_x)
-                et_y_values.append(et_y)
-                et_z_values.append(et_z)
-                time_values.append(current_time)
+                # 첫 궤적 점에 도달한 후부터만 에러 계산에 포함
+                if human_trajectory_index > 0:
+                    et_values.append(et)
+                    et_x_values.append(et_x)
+                    et_y_values.append(et_y)
+                    et_z_values.append(et_z)
+                    time_values.append(current_time)
 
                 # 종료 조건
                 if human_trajectory_index >= traj_num_points:
@@ -502,7 +505,7 @@ try:
     
     # 최종 오차를 파일로 저장
     error_file = os.path.join(RESULTS_FOLDER, "error_w1_" + str(w1) + "_w2_" + str(w2) + "_w4_" + str(w4) + "_lambda_" + str(lambda_h_a_param) + ".txt")
-    final_error = et_values[-1] if et_values else 1.0  # inf 대신 1.0으로 설정
+    final_error = np.mean(et_values) if et_values else 1.0  # inf 대신 1.0으로 설정
     with open(error_file, 'w') as f:
         f.write(str(final_error))
     
@@ -589,11 +592,16 @@ def main():
             for w4 in w_values:
                 for lambda_h_a in lambda_h_a_values:
                     if w4 == 0:
-                        if lambda_h_a == 0.3:  # lambda_h_a가 0.3일 때만 추가
+                        if lambda_h_a == 0.5:  # lambda_h_a가 0.3일 때만 추가
                             all_combinations.append((w1, w2, w4, lambda_h_a))
                     else:
                         # w4가 0이 아닌 경우는 모든 lambda_h_a 값 사용
                         all_combinations.append((w1, w2, w4, lambda_h_a))
+    # for w1 in w_values:
+    #     lambda_h_a = lambda_h_a_values[0]  # lambda_h_a 값을 고정
+    #     w2 = 1.0  # w2 값을 고정
+    #     w4 = 1.0  # w4 값을 고정
+    #     all_combinations.append((w1, w2, w4, lambda_h_a))
 
 
     

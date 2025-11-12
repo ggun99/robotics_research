@@ -48,6 +48,10 @@ class D435ArUcoDetector(Node):
         self.camera_info = {}            # camera_name -> { camera_matrix, dist_coeffs, width, height }
         self.camera_extrinsics = {}      # camera_name -> { 'position': np.array(3), 'rotation': np.array(3x3) }
 
+        # Kalman filter (3D position + velocity)
+        self.kf = self.init_kalman_filter(dt=0.1)  # timer 주기(초)
+        self.kalman_initialized = False
+
         # 캘리브레이션 로드
         self.load_camera_calibrations()
 
@@ -59,7 +63,69 @@ class D435ArUcoDetector(Node):
         self.latest_rectangle_center = None
         self.center_timestamp = 0.0
 
-        self.get_logger().info("D435 ArUco Detector (improved) initialized")
+        self.get_logger().info("D435 ArUco Detector (with Kalman) initialized")
+
+    # -------------------------------
+    # Kalman filter helpers
+    # -------------------------------
+    def init_kalman_filter(self, dt=0.1):
+        """
+        6-state Kalman: [x,y,z, vx,vy,vz], 3-measurement: [x,y,z]
+        dt: time step in seconds
+        """
+        kf = cv2.KalmanFilter(6, 3, 0)  # stateDim=6, measDim=3
+        # Transition matrix
+        # [ I3  dt*I3 ]
+        # [ 0    I3   ]
+        A = np.eye(6, dtype=np.float32)
+        A[0, 3] = dt
+        A[1, 4] = dt
+        A[2, 5] = dt
+        kf.transitionMatrix = A
+
+        # Measurement matrix: meas = H * state, H picks position
+        H = np.zeros((3, 6), dtype=np.float32)
+        H[0, 0] = 1.0
+        H[1, 1] = 1.0
+        H[2, 2] = 1.0
+        kf.measurementMatrix = H
+
+        # Covariances
+        kf.processNoiseCov = np.eye(6, dtype=np.float32) * 1e-4
+        kf.measurementNoiseCov = np.eye(3, dtype=np.float32) * 1e-2
+        kf.errorCovPost = np.eye(6, dtype=np.float32) * 1.0
+
+        # initial state (zero)
+        kf.statePost = np.zeros((6,1), dtype=np.float32)
+        return kf
+
+    def kalman_predict(self):
+        """Predict step. Returns predicted position as np.array([x,y,z])"""
+        try:
+            state = self.kf.predict()  # returns 6x1 float32
+            pos = state[0:3].reshape(3)
+            return pos.astype(float)
+        except Exception as e:
+            self.get_logger().error(f"Kalman predict error: {e}")
+            return None
+
+    def kalman_correct(self, measurement):
+        """Correct step with 3-vector measurement (x,y,z)"""
+        if measurement is None:
+            return
+        meas = np.asarray(measurement, dtype=np.float32).reshape(3,1)
+        try:
+            if not self.kalman_initialized:
+                # initialize position, zero velocity
+                self.kf.statePost = np.zeros((6,1), dtype=np.float32)
+                self.kf.statePost[0:3,0] = meas.reshape(3)
+                self.kf.statePost[3:6,0] = 0.0
+                self.kalman_initialized = True
+                self.get_logger().debug("Kalman initialized with first measurement")
+                return
+            self.kf.correct(meas)
+        except Exception as e:
+            self.get_logger().error(f"Kalman correct error: {e}")
 
     # -------------------------------
     # Calibration / subscribers
@@ -133,11 +199,11 @@ class D435ArUcoDetector(Node):
         try:
             K = np.array(msg.k, dtype=float).reshape(3,3)
             d = np.array(msg.d, dtype=float)
-            width = getattr(msg, 'width', None) or getattr(msg, 'roi', None) or None
             # fallback width/height if not present
             w = int(msg.width) if hasattr(msg, 'width') else 640
             h = int(msg.height) if hasattr(msg, 'height') else 480
             self.camera_info[camera_name] = {'camera_matrix': K, 'dist_coeffs': d, 'width': w, 'height': h}
+            # self.get_logger().info(f"Camera info: {self.camera_info}")
         except Exception as e:
             self.get_logger().error(f"camera_info_callback error for {camera_name}: {e}")
 
@@ -200,11 +266,16 @@ class D435ArUcoDetector(Node):
 
         R_wc = extrinsic['rotation']   # camera -> world rotation
         t_wc = extrinsic['position']   # camera position in world
+        if np.linalg.norm(t_wc) < 1e-6:
+            self.get_logger().warn(f"Extrinsic position for {camera_name} is near zero. Verify extrinsic file.")
 
         for i, mid in enumerate(ids.flatten()):
             if int(mid) not in self.marker_positions_local:
                 continue
             cam_t = tvecs[i].reshape(3)   # marker position in camera coordinates
+            if np.linalg.norm(cam_t) < 1e-6:
+                self.get_logger().warn(f"Marker {mid} produced near-zero tvec in {camera_name}; skip")
+                continue
             cam_r = rvecs[i].reshape(3)   # rvec (Rodrigues) in camera coords
 
             # compute marker rotation matrix in camera frame
@@ -326,8 +397,19 @@ class D435ArUcoDetector(Node):
                 WR = np.array(d.get('world_R', np.eye(3)), dtype=float)
                 per_marker_worlds.setdefault(mid, []).append({'pos': wp, 'R': WR, 'camera': d['camera_name'], 't': ts})
 
+        # If no markers observed in this time window -> use Kalman predict
         if len(per_marker_worlds) == 0:
-            return  # nothing to do
+            if not self.kalman_initialized:
+                self.get_logger().debug("No markers and kalman not initialized — skip publish")
+                return
+            pred = self.kalman_predict()
+            if pred is not None:
+                self.latest_rectangle_center = pred
+                self.center_timestamp = time.time()
+                # publish predicted position (num_markers=0)
+                self.publish_rectangle_center(pred, 0)
+                self.get_logger().debug("Published predicted center (no markers)")
+            return
 
         # 3. 각 마커별로 중간값(median) 또는 중앙값 기반 대표 위치 선택 => outlier에 강함
         marker_positions_repr = {}
@@ -340,9 +422,8 @@ class D435ArUcoDetector(Node):
                 med = np.median(pts, axis=0)
             marker_positions_repr[mid] = med
 
-            # rotation: 평균 rotation via scipy Rotation.from_matrix().mean() not built-in; use simple SVD mean on rotation matrices
+            # rotation: 평균 rotation via simple SVD average
             Rs = np.array([o['R'] for o in obs])
-            # compute rotation average by SVD of stacked matrices (approx)
             M = np.sum(Rs, axis=0)
             try:
                 U, S, Vt = np.linalg.svd(M)
@@ -359,20 +440,19 @@ class D435ArUcoDetector(Node):
         center_world = None
 
         if len(detected_ids) >= 2:
-            # Build arrays
+            # print("두개 이상")
             local_positions = np.array([self.marker_positions_local[mid] for mid in detected_ids])
             world_positions = np.array([marker_positions_repr[mid] for mid in detected_ids])
 
             R_opt, t_opt = self.robust_kabsch(local_positions, world_positions)
-
-            # compute center = R_opt @ local_center(0) + t_opt = t_opt
             center_world = t_opt
 
-            # Save and publish
-            if center_world is not None:
-                self.latest_rectangle_center = center_world
-                self.center_timestamp = time.time()
-                self.publish_rectangle_center(center_world, len(detected_ids))
+            # # --- 보정 & 퍼블리시 ---
+            # self.kalman_correct(center_world)
+            # filtered_pos = self.kf.statePost[0:3].reshape(3).astype(float)
+            # self.latest_rectangle_center = filtered_pos
+            # self.center_timestamp = time.time()
+            # self.publish_rectangle_center(filtered_pos, len(detected_ids))
 
         elif len(detected_ids) == 1:
             # single marker fallback: use marker rotation if available to rotate offset
@@ -385,13 +465,35 @@ class D435ArUcoDetector(Node):
             # world_offset = R_world_marker @ local_offset
             world_offset = world_R_marker @ local_offset
             center_world = world_marker_pos + world_offset
-            self.latest_rectangle_center = center_world
-            self.center_timestamp = time.time()
-            self.publish_rectangle_center(center_world, 1)
+
+            # Kalman correct with this (noisy) measurement
+            # self.kalman_correct(center_world)
+            # filtered_pos = self.kf.statePost[0:3].reshape(3).astype(float) if self.kalman_initialized else center_world
+            # self.latest_rectangle_center = filtered_pos
+            # self.center_timestamp = time.time()
+            # self.publish_rectangle_center(filtered_pos, 1)
 
         else:
-            # no markers
+            # should not reach here due to earlier empty check, but safe-guard
             return
+        
+        if center_world is not None:
+            # --- 칼만 초기화 (처음 한 번만) ---
+            if not self.kalman_initialized:
+                self.kf.statePost[:3, 0] = center_world  # ✅ 이렇게만 해도 충분
+                self.kf.statePost[3:, 0] = 0
+                self.kalman_initialized = True
+                print("[Kalman] initialized with first center:", center_world)
+
+            # --- 이후 보정 및 퍼블리시 ---
+            print(f"[DEBUG] center_world before kalman: {center_world}, from {len(detected_ids)} markers")
+
+            self.kalman_correct(center_world)
+            filtered_pos = self.kf.statePost[0:3].reshape(3).astype(float)
+            self.latest_rectangle_center = filtered_pos
+            self.center_timestamp = time.time()
+            self.publish_rectangle_center(filtered_pos, len(detected_ids))
+
 
     def robust_kabsch(self, local_positions, world_positions, max_iters=5, error_thresh=0.08):
         """
@@ -460,6 +562,9 @@ class D435ArUcoDetector(Node):
             Vt[-1,:] *= -1
             R_mat = Vt.T @ U.T
         t = centroid_B - R_mat @ centroid_A
+        print("t: ", t)
+        if np.linalg.norm(t) < 1e-6:
+            self.get_logger().warn("Computed translation is near zero; check input world positions")
         return R_mat, t
 
     # -------------------------------

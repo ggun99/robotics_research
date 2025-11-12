@@ -19,9 +19,9 @@ class ExtrinsicCalibrator(Node):
         # 알려진 마커들 (월드 좌표계에서의 위치)
         self.reference_markers = {
             10: np.array([0.0, 0.0, 0.0]),    # 원점
-            11: np.array([-0.105, 0.0, 0.0]),  # X축 12.8cm
-            12: np.array([0.0, 0.128, 0.0]),  # Y축 10.5cm
-            13: np.array([-0.105, 0.128, 0.0]) # 대각선
+            11: np.array([0.09, 0.0, 0.0]),  # X축 12.8cm
+            12: np.array([0.0, -0.113, 0.0]),  # Y축 10.5cm
+            13: np.array([0.09, -0.113, 0.0]) # 대각선
         }
         
         # ArUco 설정 - 버전 호환성 개선
@@ -39,7 +39,7 @@ class ExtrinsicCalibrator(Node):
                 # 더 오래된 버전
                 self.aruco_params = cv2.aruco.DetectorParameters()
         
-        self.marker_length = 0.05
+        self.marker_length = 0.075
         
         # OpenCV 버전 확인 및 출력
         cv_version = cv2.__version__

@@ -10,7 +10,7 @@ w_values = [0.0, 0.2, 0.5, 1.0]  # w1, w2, w4에 사용할 값들
 lambda_h_a_values = [0.1, 0.3, 0.5]  # lambda_h_a에 사용할 값들
 
 # 결과 저장 폴더 지정
-RESULTS_FOLDER = "str_simulation_results_minus"  # 원하는 폴더명으로 변경 가능
+RESULTS_FOLDER = "str_simulation_results_minus2"  # 원하는 폴더명으로 변경 가능
 
 def create_results_folder():
     """결과 저장용 폴더 생성"""
@@ -503,7 +503,7 @@ try:
     
     # 최종 오차를 파일로 저장
     error_file = os.path.join(RESULTS_FOLDER, "error_w1_" + str(w1) + "_w2_" + str(w2) + "_w4_" + str(w4) + "_lambda_" + str(lambda_h_a_param) + ".txt")
-    final_error = et_values[-1] if et_values else 1.0  # inf 대신 1.0으로 설정
+    final_error = np.mean(et_values) if et_values else 1.0  # inf 대신 1.0으로 설정
     
     # theta_values 평균 계산
     avg_theta = np.mean(theta_values) if theta_values else 0.0
@@ -608,7 +608,7 @@ def main():
             for w4 in w_values:
                 for lambda_h_a in lambda_h_a_values:
                     if w4 == 0:
-                        if lambda_h_a == 0.3:  # lambda_h_a가 0.3일 때만 추가
+                        if lambda_h_a == 0.5:  # lambda_h_a가 0.3일 때만 추가
                             all_combinations.append((w1, w2, w4, lambda_h_a))
                     else:
                         # w4가 0이 아닌 경우는 모든 lambda_h_a 값 사용

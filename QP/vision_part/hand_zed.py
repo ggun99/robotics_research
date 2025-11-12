@@ -138,8 +138,8 @@ class Vision_Hand(Node):
                 print("No hands detected.")
 
             # 4. Draw person boxes
-            for x1, y1, x2, y2 in person_boxes:
-                cv.rectangle(imgbgr, (x1, y1), (x2, y2), (0, 255, 0), 2)
+            # for x1, y1, x2, y2 in person_boxes:
+            #     cv.rectangle(imgbgr, (x1, y1), (x2, y2), (0, 255, 0), 2)
 
             cv.imshow("YOLO + Hand Tracking", imgbgr)
             cv.waitKey(1)
@@ -171,7 +171,7 @@ class Vision_Hand(Node):
         if self.no_hand == True:
             print('No hand detected, no publish')
         else:
-            print(self.H_r2h)
+            # print(self.H_r2h)
             a_pose.position.x = float(self.H_r2h[0][3])
             a_pose.position.y = float(self.H_r2h[1][3])
             a_pose.position.z = float(self.H_r2h[2][3])
