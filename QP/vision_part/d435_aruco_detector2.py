@@ -31,7 +31,7 @@ class D435ArUcoDetector(Node):
                 self.aruco_params = cv2.aruco.DetectorParameters_create()
             except AttributeError:
                 self.aruco_params = cv2.aruco.DetectorParameters()
-        self.marker_length = 0.05  # [m]
+        self.marker_length = 0.075  # [m]
 
         # 로컬 마커 좌표 (id: [x,y,z]) - 사용자 제공 값 사용
         self.marker_positions_local = {

@@ -447,12 +447,7 @@ class D435ArUcoDetector(Node):
             R_opt, t_opt = self.robust_kabsch(local_positions, world_positions)
             center_world = t_opt
 
-            # # --- 보정 & 퍼블리시 ---
-            # self.kalman_correct(center_world)
-            # filtered_pos = self.kf.statePost[0:3].reshape(3).astype(float)
-            # self.latest_rectangle_center = filtered_pos
-            # self.center_timestamp = time.time()
-            # self.publish_rectangle_center(filtered_pos, len(detected_ids))
+       
 
         elif len(detected_ids) == 1:
             # single marker fallback: use marker rotation if available to rotate offset
@@ -466,12 +461,7 @@ class D435ArUcoDetector(Node):
             world_offset = world_R_marker @ local_offset
             center_world = world_marker_pos + world_offset
 
-            # Kalman correct with this (noisy) measurement
-            # self.kalman_correct(center_world)
-            # filtered_pos = self.kf.statePost[0:3].reshape(3).astype(float) if self.kalman_initialized else center_world
-            # self.latest_rectangle_center = filtered_pos
-            # self.center_timestamp = time.time()
-            # self.publish_rectangle_center(filtered_pos, 1)
+            
 
         else:
             # should not reach here due to earlier empty check, but safe-guard
@@ -577,7 +567,7 @@ class D435ArUcoDetector(Node):
         msg.header.frame_id = 'world'
         msg.pose.position.x = float(center[0])
         msg.pose.position.y = float(center[1])
-        msg.pose.position.z = float(center[2])
+        msg.pose.position.z = float(center[2] - 0.51921) 
         msg.pose.orientation.w = 1.0
         self.rectangle_center_pub.publish(msg)
         self.get_logger().info(f'Rectangle center: ({center[0]:.3f}, {center[1]:.3f}, {center[2]:.3f}) from {num_markers} markers')

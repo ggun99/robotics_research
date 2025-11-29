@@ -67,14 +67,14 @@ class D435ArUcoTracker(Node):
             self.camera_info_callback, 10
         )
         # 7번 위치 D435 카메라에서 발행하는 토픽 구독 (6번 마커만 볼 수 있음)
-        # self.d435_aruco_6_sub = self.create_subscription(
-        #     Pose, '/aruco_pose',  # 7번 위치 D435에서 본 6번 마커
-        #     self.d435_aruco_6_callback, 10
-        # )
-        # self.d435_depth_6_sub = self.create_subscription(
-        #     Pose, '/depth_pose',  # 7번 위치 D435에서 본 6번 마커 (depth)
-        #     self.d435_depth_6_callback, 10
-        # )
+        self.d435_aruco_6_sub = self.create_subscription(
+            Pose, '/aruco_pose',  # 7번 위치 D435에서 본 6번 마커
+            self.d435_aruco_6_callback, 10
+        )
+        self.d435_depth_6_sub = self.create_subscription(
+            Pose, '/depth_pose',  # 7번 위치 D435에서 본 6번 마커 (depth)
+            self.d435_depth_6_callback, 10
+        )
         # 퍼블리셔 설정 (각 마커별로 별도 토픽)
         # self.aruco_marker6_pub = self.create_publisher(
         #     Pose, '/aruco_marker_6_pose', 10
@@ -178,8 +178,8 @@ class D435ArUcoTracker(Node):
             
             # 오른쪽 아래 코너 (index 2) 사용
             bottom_right_corner = (corner_points[2]+corner_points[1]+corner_points[0]+corner_points[3])/4  # [x, y]
-            center_x = int(bottom_right_corner[0])
-            center_y = int(bottom_right_corner[1])
+            center_x = int(bottom_right_corner[0])+5
+            center_y = int(bottom_right_corner[1])+5
             
             # 오른쪽 아래 코너 주변의 depth 값들 평균 계산 (노이즈 감소)
             window_size = 3  # 더 작은 윈도우 사용 (코너는 더 정확하므로)
@@ -319,17 +319,17 @@ class D435ArUcoTracker(Node):
         if self.show_display:
             self.show_results()
     
-    # def d435_aruco_6_callback(self, msg):
-    #     """7번 위치 D435에서 본 6번 마커 ArUco 위치 콜백"""
-    #     self.d435_aruco_6_pose = msg
-    #     pos = msg.position
-    #     # self.get_logger().info(f"D435에서 본 6번 ArUco 위치: x={pos.x:.4f}, y={pos.y:.4f}, z={pos.z:.4f}")
+    def d435_aruco_6_callback(self, msg):
+        """7번 위치 D435에서 본 6번 마커 ArUco 위치 콜백"""
+        self.d435_aruco_6_pose = msg
+        pos = msg.position
+        # self.get_logger().info(f"D435에서 본 6번 ArUco 위치: x={pos.x:.4f}, y={pos.y:.4f}, z={pos.z:.4f}")
 
-    # def d435_depth_6_callback(self, msg):
-    #     """7번 위치 D435에서 본 6번 마커 Depth 위치 콜백"""
-    #     self.d435_depth_6_pose = msg
-    #     pos = msg.position
-    #     # self.get_logger().info(f"D435에서 본 6번 Depth 위치: x={pos.x:.4f}, y={pos.y:.4f}, z={pos.z:.4f}")
+    def d435_depth_6_callback(self, msg):
+        """7번 위치 D435에서 본 6번 마커 Depth 위치 콜백"""
+        self.d435_depth_6_pose = msg
+        pos = msg.position
+        # self.get_logger().info(f"D435에서 본 6번 Depth 위치: x={pos.x:.4f}, y={pos.y:.4f}, z={pos.z:.4f}")
 
     def compare_marker_distances(self):
         """6번과 7번 마커 간의 거리 비교 (외부 카메라 vs 7번 위치 D435)"""

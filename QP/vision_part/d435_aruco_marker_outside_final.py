@@ -21,6 +21,8 @@ class D435ArUcoTracker(Node):
         super().__init__('d435_aruco_tracker')
         self.external_aruco_distances = []
         self.external_aruco_depth_distances = []
+        self.external_depth_aruco_distances = [] # 외부 Depth vs D435 ArUco (새로 추가)
+        self.external_depth_depth_distances = [] # 외부 Depth vs D435 Depth (새로 추가)
 
         # ArUco 설정
         self.aruco_dict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_50)
@@ -52,7 +54,14 @@ class D435ArUcoTracker(Node):
         
         # 로컬 계산 결과 저장용
         self.local_marker_results = {}  # {marker_id: {'aruco': result, 'depth': result}}
-        
+        # 평균 데이터 저장용 (그래프 표시)
+        self.avg_history = {
+            'aruco_aruco_diff': [],     # 외부ArUco vs D435ArUco
+            'aruco_depth_diff': [],     # 외부ArUco vs D435Depth
+            'depth_aruco_diff': [],     # 외부Depth vs D435ArUco (새로 추가)
+            'depth_depth_diff': [],     # 외부Depth vs D435Depth (새로 추가)
+            'timestamps': []
+        }
         # 구독자 설정 (개별 콜백 사용)
         self.color_sub = self.create_subscription(
             Image, '/camera/camera/color/image_raw',
@@ -67,14 +76,14 @@ class D435ArUcoTracker(Node):
             self.camera_info_callback, 10
         )
         # 7번 위치 D435 카메라에서 발행하는 토픽 구독 (6번 마커만 볼 수 있음)
-        # self.d435_aruco_6_sub = self.create_subscription(
-        #     Pose, '/aruco_pose',  # 7번 위치 D435에서 본 6번 마커
-        #     self.d435_aruco_6_callback, 10
-        # )
-        # self.d435_depth_6_sub = self.create_subscription(
-        #     Pose, '/depth_pose',  # 7번 위치 D435에서 본 6번 마커 (depth)
-        #     self.d435_depth_6_callback, 10
-        # )
+        self.d435_aruco_6_sub = self.create_subscription(
+            Pose, '/aruco_pose',  # 7번 위치 D435에서 본 6번 마커
+            self.d435_aruco_6_callback, 10
+        )
+        self.d435_depth_6_sub = self.create_subscription(
+            Pose, '/depth_pose',  # 7번 위치 D435에서 본 6번 마커 (depth)
+            self.d435_depth_6_callback, 10
+        )
         # 퍼블리셔 설정 (각 마커별로 별도 토픽)
         # self.aruco_marker6_pub = self.create_publisher(
         #     Pose, '/aruco_marker_6_pose', 10
@@ -182,7 +191,7 @@ class D435ArUcoTracker(Node):
             center_y = int(bottom_right_corner[1])
             
             # 오른쪽 아래 코너 주변의 depth 값들 평균 계산 (노이즈 감소)
-            window_size = 3  # 더 작은 윈도우 사용 (코너는 더 정확하므로)
+            window_size = 2  # 더 작은 윈도우 사용 (코너는 더 정확하므로)
             depth_values = []
             
             height, width = depth_image.shape
@@ -319,38 +328,36 @@ class D435ArUcoTracker(Node):
         if self.show_display:
             self.show_results()
     
-    # def d435_aruco_6_callback(self, msg):
-    #     """7번 위치 D435에서 본 6번 마커 ArUco 위치 콜백"""
-    #     self.d435_aruco_6_pose = msg
-    #     pos = msg.position
-    #     # self.get_logger().info(f"D435에서 본 6번 ArUco 위치: x={pos.x:.4f}, y={pos.y:.4f}, z={pos.z:.4f}")
+    def d435_aruco_6_callback(self, msg):
+        """7번 위치 D435에서 본 6번 마커 ArUco 위치 콜백"""
+        self.d435_aruco_6_pose = msg
+        pos = msg.position
+        # self.get_logger().info(f"D435에서 본 6번 ArUco 위치: x={pos.x:.4f}, y={pos.y:.4f}, z={pos.z:.4f}")
 
-    # def d435_depth_6_callback(self, msg):
-    #     """7번 위치 D435에서 본 6번 마커 Depth 위치 콜백"""
-    #     self.d435_depth_6_pose = msg
-    #     pos = msg.position
-    #     # self.get_logger().info(f"D435에서 본 6번 Depth 위치: x={pos.x:.4f}, y={pos.y:.4f}, z={pos.z:.4f}")
+    def d435_depth_6_callback(self, msg):
+        """7번 위치 D435에서 본 6번 마커 Depth 위치 콜백"""
+        self.d435_depth_6_pose = msg
+        pos = msg.position
+        # self.get_logger().info(f"D435에서 본 6번 Depth 위치: x={pos.x:.4f}, y={pos.y:.4f}, z={pos.z:.4f}")
 
     def compare_marker_distances(self):
-        """6번과 7번 마커 간의 거리 비교 (외부 카메라 vs 7번 위치 D435)"""
+        """6번과 7번 마커 간의 거리 비교 (모든 조합)"""
         # 6번과 7번 마커가 모두 외부 카메라에서 감지되었는지 확인
         if 6 not in self.local_marker_results or 7 not in self.local_marker_results:
             return
         
-        external_6_aruco = self.local_marker_results[6]['aruco']  # 외부 카메라에서 본 6번
-        external_7_aruco = self.local_marker_results[7]['aruco']  # 외부 카메라에서 본 7번
+        external_6_aruco = self.local_marker_results[6]['aruco']
+        external_7_aruco = self.local_marker_results[7]['aruco']
         external_6_depth = self.local_marker_results[6]['depth']
         external_7_depth = self.local_marker_results[7]['depth']
         
-        # ArUco 기반 거리 비교
+        # 1. 외부 ArUco vs D435 ArUco 비교 (기존)
         if (external_6_aruco['valid'] and external_7_aruco['valid'] and 
             self.d435_aruco_6_pose is not None):
             
-            # 외부 카메라에서 본 6번-7번 간 거리 (ArUco)
             external_6_7_vec = external_6_aruco['position'] - external_7_aruco['position']
             external_aruco_distance = np.linalg.norm(external_6_7_vec)
             
-            # 7번 위치에서 본 6번 마커까지의 거리 (ArUco)
             d435_6_pos = np.array([
                 self.d435_aruco_6_pose.position.x,
                 self.d435_aruco_6_pose.position.y,
@@ -358,33 +365,26 @@ class D435ArUcoTracker(Node):
             ])
             d435_aruco_distance = np.linalg.norm(d435_6_pos)
             
-            # 거리 차이 계산
-            aruco_distance_diff = abs(external_aruco_distance - d435_aruco_distance)
-            self.external_aruco_distances.append(aruco_distance_diff)
-            if len(self.external_aruco_distances) >= 100:
-                ext_aruco_avg = np.mean(self.external_aruco_distances)
-                print(f"External ArUco Distance Difference Average over 100 samples: {ext_aruco_avg:.4f}m")
-                self.external_aruco_distances = []
-            # 좌표별 차이 (외부 6-7 벡터 vs D435 6번 위치)
-            coord_diff = external_6_7_vec - d435_6_pos
+            aruco_aruco_diff = abs(external_aruco_distance - d435_aruco_distance)
+            self.external_aruco_distances.append(aruco_aruco_diff)
             
-            # self.get_logger().info(f"\n=== ArUco Method Distance Comparison ===")
-            # self.get_logger().info(f"External camera 6-7 distance: {external_aruco_distance:.4f}m")
-            # self.get_logger().info(f"External camera 6-7 vector: x={external_6_7_vec[0]:.4f}, y={external_6_7_vec[1]:.4f}, z={external_6_7_vec[2]:.4f}")
-            # self.get_logger().info(f"D435 camera to marker 6 distance: {d435_aruco_distance:.4f}m")
-            # self.get_logger().info(f"D435 camera to marker 6 position: x={d435_6_pos[0]:.4f}, y={d435_6_pos[1]:.4f}, z={d435_6_pos[2]:.4f}")
-            # self.get_logger().info(f"TOTAL DISTANCE DIFFERENCE: {aruco_distance_diff:.4f}m")
-            # self.get_logger().info(f"Coordinate differences: dx={coord_diff[0]:.4f}, dy={coord_diff[1]:.4f}, dz={coord_diff[2]:.4f}")
+            # 100개마다 평균 계산
+            if len(self.external_aruco_distances) >= 100:
+                avg = np.mean(self.external_aruco_distances)
+                self.avg_history['aruco_aruco_diff'].append(avg)
+                self.avg_history['timestamps'].append(time.time())
+                
+                sample_count = len(self.avg_history['aruco_aruco_diff'])
+                print(f"External ArUco vs D435 ArUco Distance Difference Average #{sample_count}: {avg:.4f}m")
+                self.external_aruco_distances = []
         
-        # Depth 기반 거리 비교
-        if (external_6_depth['valid'] and external_7_depth['valid'] and 
+        # 2. 외부 ArUco vs D435 Depth 비교 (기존)
+        if (external_6_aruco['valid'] and external_7_aruco['valid'] and 
             self.d435_depth_6_pose is not None):
             
-            # 외부 카메라에서 본 6번-7번 간 거리 (Depth)
-            external_6_7_vec = external_6_depth['position'] - external_7_depth['position']
-            external_depth_distance = np.linalg.norm(external_6_7_vec)
+            external_6_7_vec = external_6_aruco['position'] - external_7_aruco['position']
+            external_aruco_distance = np.linalg.norm(external_6_7_vec)
             
-            # 7번 위치에서 본 6번 마커까지의 거리 (Depth)
             d435_6_pos = np.array([
                 self.d435_depth_6_pose.position.x,
                 self.d435_depth_6_pose.position.y,
@@ -392,266 +392,221 @@ class D435ArUcoTracker(Node):
             ])
             d435_depth_distance = np.linalg.norm(d435_6_pos)
             
-            # 거리 차이 계산
-            depth_distance_diff = abs(external_depth_distance - d435_depth_distance)
-            aruco_depth_distance_diff = abs(external_aruco_distance - d435_depth_distance)
-            self.external_aruco_depth_distances.append(aruco_depth_distance_diff)
+            aruco_depth_diff = abs(external_aruco_distance - d435_depth_distance)
+            self.external_aruco_depth_distances.append(aruco_depth_diff)
+            
+            # 100개마다 평균 계산
             if len(self.external_aruco_depth_distances) >= 100:
-                ext_aruco_depth_avg = np.mean(self.external_aruco_depth_distances)
-                print(f"External ArUco-Depth Distance Difference Average over 100 samples: {ext_aruco_depth_avg:.4f}m")
+                avg = np.mean(self.external_aruco_depth_distances)
+                self.avg_history['aruco_depth_diff'].append(avg)
+                
+                sample_count = len(self.avg_history['aruco_depth_diff'])
+                print(f"External ArUco vs D435 Depth Distance Difference Average #{sample_count}: {avg:.4f}m")
                 self.external_aruco_depth_distances = []
-            # 좌표별 차이
-            coord_diff = external_6_7_vec - d435_6_pos
-            
-            # self.get_logger().info(f"\n=== Depth Method Distance Comparison ===")
-            # self.get_logger().info(f"External camera 6-7 distance: {external_depth_distance:.4f}m")
-            # self.get_logger().info(f"External camera 6-7 vector: x={external_6_7_vec[0]:.4f}, y={external_6_7_vec[1]:.4f}, z={external_6_7_vec[2]:.4f}")
-            # self.get_logger().info(f"D435 camera to marker 6 distance: {d435_depth_distance:.4f}m")
-            # self.get_logger().info(f"D435 camera to marker 6 position: x={d435_6_pos[0]:.4f}, y={d435_6_pos[1]:.4f}, z={d435_6_pos[2]:.4f}")
-            # self.get_logger().info(f"TOTAL DISTANCE DIFFERENCE: {depth_distance_diff:.4f}m")
-            # self.get_logger().info(f"Coordinate differences: dx={coord_diff[0]:.4f}, dy={coord_diff[1]:.4f}, dz={coord_diff[2]:.4f}")
         
-        # ArUco vs Depth 방법 직접 비교
-        if (external_6_aruco['valid'] and external_7_aruco['valid'] and 
-            external_6_depth['valid'] and external_7_depth['valid'] and 
-            self.d435_aruco_6_pose is not None and self.d435_depth_6_pose is not None):
+        # 3. 외부 Depth vs D435 ArUco 비교 (새로 추가)
+        if (external_6_depth['valid'] and external_7_depth['valid'] and 
+            self.d435_aruco_6_pose is not None):
             
-            # 외부 카메라의 ArUco vs Depth 차이
-            ext_aruco_vec = external_6_aruco['position'] - external_7_aruco['position']
-            ext_depth_vec = external_6_depth['position'] - external_7_depth['position']
-            ext_aruco_dist = np.linalg.norm(ext_aruco_vec)
-            ext_depth_dist = np.linalg.norm(ext_depth_vec)
-            ext_method_diff = abs(ext_aruco_dist - ext_depth_dist)
+            external_6_7_vec = external_6_depth['position'] - external_7_depth['position']
+            external_depth_distance = np.linalg.norm(external_6_7_vec)
             
-            # D435 카메라의 ArUco vs Depth 차이
-            d435_aruco_pos = np.array([
+            d435_6_pos = np.array([
                 self.d435_aruco_6_pose.position.x,
                 self.d435_aruco_6_pose.position.y,
                 self.d435_aruco_6_pose.position.z
             ])
-            d435_depth_pos = np.array([
+            d435_aruco_distance = np.linalg.norm(d435_6_pos)
+            
+            depth_aruco_diff = abs(external_depth_distance - d435_aruco_distance)
+            self.external_depth_aruco_distances.append(depth_aruco_diff)
+            
+            # 100개마다 평균 계산
+            if len(self.external_depth_aruco_distances) >= 100:
+                avg = np.mean(self.external_depth_aruco_distances)
+                self.avg_history['depth_aruco_diff'].append(avg)
+                
+                sample_count = len(self.avg_history['depth_aruco_diff'])
+                print(f"External Depth vs D435 ArUco Distance Difference Average #{sample_count}: {avg:.4f}m")
+                self.external_depth_aruco_distances = []
+        
+        # 4. 외부 Depth vs D435 Depth 비교 (새로 추가)
+        if (external_6_depth['valid'] and external_7_depth['valid'] and 
+            self.d435_depth_6_pose is not None):
+            
+            external_6_7_vec = external_6_depth['position'] - external_7_depth['position']
+            external_depth_distance = np.linalg.norm(external_6_7_vec)
+            
+            d435_6_pos = np.array([
                 self.d435_depth_6_pose.position.x,
                 self.d435_depth_6_pose.position.y,
                 self.d435_depth_6_pose.position.z
             ])
-            d435_aruco_dist = np.linalg.norm(d435_aruco_pos)
-            d435_depth_dist = np.linalg.norm(d435_depth_pos)
-            d435_method_diff = abs(d435_aruco_dist - d435_depth_dist)
+            d435_depth_distance = np.linalg.norm(d435_6_pos)
             
-            # self.get_logger().info(f"\n=== Method Comparison (ArUco vs Depth) ===")
-            # self.get_logger().info(f"External camera method difference: {ext_method_diff:.4f}m (ArUco: {ext_aruco_dist:.4f}m, Depth: {ext_depth_dist:.4f}m)")
-            # self.get_logger().info(f"D435 camera method difference: {d435_method_diff:.4f}m (ArUco: {d435_aruco_dist:.4f}m, Depth: {d435_depth_dist:.4f}m)")
-            # self.get_logger().info(f"="*50)
+            depth_depth_diff = abs(external_depth_distance - d435_depth_distance)
+            self.external_depth_depth_distances.append(depth_depth_diff)
+            
+            # 100개마다 평균 계산
+            if len(self.external_depth_depth_distances) >= 100:
+                avg = np.mean(self.external_depth_depth_distances)
+                self.avg_history['depth_depth_diff'].append(avg)
+                
+                sample_count = len(self.avg_history['depth_depth_diff'])
+                print(f"External Depth vs D435 Depth Distance Difference Average #{sample_count}: {avg:.4f}m")
+                self.external_depth_depth_distances = []
+
+    def show_final_graph(self):
+        """최종 그래프 표시 - 4개 비교 모두 포함"""
+        import matplotlib.pyplot as plt
+    
+        # 데이터 확인
+        aruco_aruco_data = self.avg_history['aruco_aruco_diff']
+        aruco_depth_data = self.avg_history['aruco_depth_diff'] 
+        depth_aruco_data = self.avg_history['depth_aruco_diff']
+        depth_depth_data = self.avg_history['depth_depth_diff']
+        
+        if (len(aruco_aruco_data) == 0 and len(aruco_depth_data) == 0 and 
+            len(depth_aruco_data) == 0 and len(depth_depth_data) == 0):
+            print("표시할 그래프 데이터가 없습니다. (100개 이상의 샘플이 필요)")
+            return
+        
+        # 2x2 그래프 설정
+        fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(15, 12))
+        
+        # 1. 외부 ArUco vs D435 ArUco
+        if len(aruco_aruco_data) > 0:
+            x = list(range(1, len(aruco_aruco_data) + 1))
+            ax1.plot(x, aruco_aruco_data, 'b-o', linewidth=2, markersize=6)
+            ax1.set_title('External ArUco vs D435 ArUco\nDistance Differences', fontweight='bold')
+            ax1.set_ylabel('Distance Difference (m)')
+            ax1.grid(True, alpha=0.3)
+            
+            mean_val = np.mean(aruco_aruco_data)
+            ax1.axhline(y=mean_val, color='red', linestyle='--', alpha=0.7)
+            ax1.text(0.02, 0.98, f'Mean: {mean_val:.4f}m\nStd: {np.std(aruco_aruco_data):.4f}m\nSamples: {len(aruco_aruco_data)}', 
+                    transform=ax1.transAxes, verticalalignment='top', 
+                    bbox=dict(boxstyle='round', facecolor='lightblue', alpha=0.7))
+        else:
+            ax1.text(0.5, 0.5, 'No Data Available', transform=ax1.transAxes, ha='center', va='center')
+            ax1.set_title('External ArUco vs D435 ArUco - No Data')
+        # 2. 외부 ArUco vs D435 Depth  
+        if len(aruco_depth_data) > 0:
+            x = list(range(1, len(aruco_depth_data) + 1))
+            ax2.plot(x, aruco_depth_data, 'r-s', linewidth=2, markersize=6)
+            ax2.set_title('External ArUco vs D435 Depth\nDistance Differences', fontweight='bold')
+            ax2.set_ylabel('Distance Difference (m)')
+            ax2.grid(True, alpha=0.3)
+            
+            mean_val = np.mean(aruco_depth_data)
+            ax2.axhline(y=mean_val, color='blue', linestyle='--', alpha=0.7)
+            ax2.text(0.02, 0.98, f'Mean: {mean_val:.4f}m\nStd: {np.std(aruco_depth_data):.4f}m\nSamples: {len(aruco_depth_data)}', 
+                    transform=ax2.transAxes, verticalalignment='top',
+                    bbox=dict(boxstyle='round', facecolor='lightcoral', alpha=0.7))
+        else:
+            ax2.text(0.5, 0.5, 'No Data Available', transform=ax2.transAxes, ha='center', va='center')
+            ax2.set_title('External ArUco vs D435 Depth - No Data')
+        
+        # 3. 외부 Depth vs D435 ArUco (새로 추가)
+        if len(depth_aruco_data) > 0:
+            x = list(range(1, len(depth_aruco_data) + 1))
+            ax3.plot(x, depth_aruco_data, 'g-^', linewidth=2, markersize=6)
+            ax3.set_title('External Depth vs D435 ArUco\nDistance Differences', fontweight='bold')
+            ax3.set_xlabel('Sample Number (×100 measurements)')
+            ax3.set_ylabel('Distance Difference (m)')
+            ax3.grid(True, alpha=0.3)
+            
+            mean_val = np.mean(depth_aruco_data)
+            ax3.axhline(y=mean_val, color='red', linestyle='--', alpha=0.7)
+            ax3.text(0.02, 0.98, f'Mean: {mean_val:.4f}m\nStd: {np.std(depth_aruco_data):.4f}m\nSamples: {len(depth_aruco_data)}', 
+                    transform=ax3.transAxes, verticalalignment='top',
+                    bbox=dict(boxstyle='round', facecolor='lightgreen', alpha=0.7))
+        else:
+            ax3.text(0.5, 0.5, 'No Data Available', transform=ax3.transAxes, ha='center', va='center')
+            ax3.set_title('External Depth vs D435 ArUco - No Data')
+            ax3.set_xlabel('Sample Number (×100 measurements)')
+        # 4. 외부 Depth vs D435 Depth (새로 추가)
+        if len(depth_depth_data) > 0:
+            x = list(range(1, len(depth_depth_data) + 1))
+            ax4.plot(x, depth_depth_data, 'm-d', linewidth=2, markersize=6)
+            ax4.set_title('External Depth vs D435 Depth\nDistance Differences', fontweight='bold')
+            ax4.set_xlabel('Sample Number (×100 measurements)')
+            ax4.set_ylabel('Distance Difference (m)')
+            ax4.grid(True, alpha=0.3)
+            
+            mean_val = np.mean(depth_depth_data)
+            ax4.axhline(y=mean_val, color='blue', linestyle='--', alpha=0.7)
+            ax4.text(0.02, 0.98, f'Mean: {mean_val:.4f}m\nStd: {np.std(depth_depth_data):.4f}m\nSamples: {len(depth_depth_data)}', 
+                    transform=ax4.transAxes, verticalalignment='top',
+                    bbox=dict(boxstyle='round', facecolor='plum', alpha=0.7))
+        else:
+            ax4.text(0.5, 0.5, 'No Data Available', transform=ax4.transAxes, ha='center', va='center')
+            ax4.set_title('External Depth vs D435 Depth - No Data')
+            ax4.set_xlabel('Sample Number (×100 measurements)')
+        
+        plt.tight_layout()
+        
+        # 전체 통계 출력
+        print("\n" + "="*80)
+        print("=== COMPREHENSIVE DISTANCE COMPARISON STATISTICS ===")
+    
+        if len(aruco_aruco_data) > 0:
+            print(f"1. External ArUco vs D435 ArUco:")
+            print(f"   - Samples: {len(aruco_aruco_data)} (Total: {len(aruco_aruco_data) * 100})")
+            print(f"   - Mean: {np.mean(aruco_aruco_data):.6f}m")
+            print(f"   - Std: {np.std(aruco_aruco_data):.6f}m")
+            print(f"   - Range: {np.min(aruco_aruco_data):.6f}m ~ {np.max(aruco_aruco_data):.6f}m")
+        
+        if len(aruco_depth_data) > 0:
+            print(f"2. External ArUco vs D435 Depth:")
+            print(f"   - Samples: {len(aruco_depth_data)} (Total: {len(aruco_depth_data) * 100})")
+            print(f"   - Mean: {np.mean(aruco_depth_data):.6f}m")
+            print(f"   - Std: {np.std(aruco_depth_data):.6f}m")
+            print(f"   - Range: {np.min(aruco_depth_data):.6f}m ~ {np.max(aruco_depth_data):.6f}m")
+        
+        if len(depth_aruco_data) > 0:
+            print(f"3. External Depth vs D435 ArUco:")
+            print(f"   - Samples: {len(depth_aruco_data)} (Total: {len(depth_aruco_data) * 100})")
+            print(f"   - Mean: {np.mean(depth_aruco_data):.6f}m")
+            print(f"   - Std: {np.std(depth_aruco_data):.6f}m")
+            print(f"   - Range: {np.min(depth_aruco_data):.6f}m ~ {np.max(depth_aruco_data):.6f}m")
+        
+        if len(depth_depth_data) > 0:
+            print(f"4. External Depth vs D435 Depth:")
+            print(f"   - Samples: {len(depth_depth_data)} (Total: {len(depth_depth_data) * 100})")
+            print(f"   - Mean: {np.mean(depth_depth_data):.6f}m")
+            print(f"   - Std: {np.std(depth_depth_data):.6f}m")
+            print(f"   - Range: {np.min(depth_depth_data):.6f}m ~ {np.max(depth_depth_data):.6f}m")
+        
+        print("="*80)
+        
+        # 그래프 표시
+        plt.show()
 
     def draw_results(self, frame, marker_id, corners, aruco_result, depth_result):
-        """결과를 프레임에 그리기"""
-        # 마커 테두리 그리기
-        cv2.aruco.drawDetectedMarkers(frame, [corners])
-        
-        # 마커 ID 표시
-        corner_points = corners.reshape(-1, 2)
-        center = tuple(map(int, np.mean(corner_points, axis=0)))
-        
-        # 마커 ID에 따라 텍스트 위치 조정 (겹치지 않도록)
-        if marker_id == 6:
-            text_x = center[0] + 70  # 6번 마커는 오른쪽
-            text_y_start = center[1] - 60  
-        elif marker_id == 7:
-            text_x = center[0] - 200  # 7번 마커는 왼쪽
-            text_y_start = center[1] - 60
-        else:
-            text_x = center[0] + 50  # 기본값
-            text_y_start = center[1] - 40
-        
-        # ID 텍스트
-        cv2.putText(frame, f"ID: {marker_id}", 
-                   (text_x, text_y_start),
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
-        
-        # ArUco 결과 표시
-        if aruco_result['valid']:
-            pos = aruco_result['position']
-            text = f"ArUco: ({pos[0]:.3f}, {pos[1]:.3f}, {pos[2]:.3f})"
-            cv2.putText(frame, text, 
-                       (text_x, text_y_start + 25),
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 0, 0), 1)
-            
-            # 좌표축 그리기
-            cv2.drawFrameAxes(frame, self.camera_matrix, self.dist_coeffs,
-                              aruco_result['rotation_vector'], 
-                              aruco_result['position'], self.marker_size)
-        
-        # draw_results 함수의 Depth 결과 표시 부분 수정
-        if depth_result['valid']:
-            pos = depth_result['position']
-            corner_type = depth_result.get('corner_type', 'center')
-            text = f"Depth({corner_type}): ({pos[0]:.3f}, {pos[1]:.3f}, {pos[2]:.3f})"
-            cv2.putText(frame, text, 
-                    (text_x, text_y_start + 50),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 0, 255), 1)
-            
-            # 사용한 코너점 강조 표시
-            pixel_coords = depth_result['pixel_coords']
-            cv2.circle(frame, pixel_coords, 5, (0, 0, 255), -1)  # 빨간 원
-            cv2.circle(frame, pixel_coords, 8, (255, 255, 255), 2)  # 흰색 테두리
-            
-            # 코너 라벨 표시
-            cv2.putText(frame, "BR", (pixel_coords[0] + 10, pixel_coords[1] - 10),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1)
-        
-        # 차이 계산 및 표시
-        if aruco_result['valid'] and depth_result['valid']:
-            diff = np.linalg.norm(aruco_result['position'] - depth_result['position'])
-            text = f"Local Diff: {diff:.3f}m"
-            cv2.putText(frame, text, 
-                       (text_x, text_y_start + 75),
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 0), 1)
-        
-        # 마커 간 거리 차이 표시 (화면 상단에)
-        if (6 in self.local_marker_results and 7 in self.local_marker_results and
-            marker_id == 6):  # 6번 마커일 때만 한 번 표시
-            
-            external_6_aruco = self.local_marker_results[6]['aruco']
-            external_7_aruco = self.local_marker_results[7]['aruco']
-            external_6_depth = self.local_marker_results[6]['depth']
-            external_7_depth = self.local_marker_results[7]['depth']
-            
-            y_pos = 120
-            
-            # === ArUco 기반 비교 ===
-            cv2.putText(frame, "=== ArUco Method ===", 
-                       (10, y_pos), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
-            y_pos += 30
-            
-            if (external_6_aruco['valid'] and external_7_aruco['valid'] and 
-                self.d435_aruco_6_pose is not None):
-                
-                # 외부 카메라에서 본 6번-7번 간 벡터와 거리
-                external_6_7_vec = external_6_aruco['position'] - external_7_aruco['position']
-                external_aruco_distance = np.linalg.norm(external_6_7_vec)
-                
-                # 7번 위치에서 본 6번 마커 위치와 거리
-                d435_6_pos = np.array([
-                    self.d435_aruco_6_pose.position.x,
-                    self.d435_aruco_6_pose.position.y,
-                    self.d435_aruco_6_pose.position.z
-                ])
-                d435_aruco_distance = np.linalg.norm(d435_6_pos)
-                
-                # 거리 차이와 좌표별 차이
-                aruco_distance_diff = abs(external_aruco_distance - d435_aruco_distance)
-                coord_diff = external_6_7_vec - d435_6_pos
-                
-                # ArUco 결과 표시
-                cv2.putText(frame, f"External 6-7 distance: {external_aruco_distance:.3f}m", 
-                           (10, y_pos), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 255, 255), 1)
-                y_pos += 20
-                cv2.putText(frame, f"D435 to marker 6: {d435_aruco_distance:.3f}m", 
-                           (10, y_pos), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 255, 255), 1)
-                y_pos += 20
-                cv2.putText(frame, f"Total distance diff: {aruco_distance_diff:.3f}m", 
-                           (10, y_pos), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 2)
-                y_pos += 20
-                cv2.putText(frame, f"Coord diff: dx={coord_diff[0]:.3f}, dy={coord_diff[1]:.3f}, dz={coord_diff[2]:.3f}", 
-                           (10, y_pos), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 255), 1)
-                y_pos += 35
-            else:
-                cv2.putText(frame, "ArUco data not available", 
-                           (10, y_pos), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (100, 100, 100), 1)
-                y_pos += 35
-            
-            # === Depth 기반 비교 ===
-            cv2.putText(frame, "=== Depth Method ===", 
-                       (10, y_pos), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 0, 255), 2)
-            y_pos += 30
-            
-            if (external_6_depth['valid'] and external_7_depth['valid'] and 
-                self.d435_depth_6_pose is not None):
-                
-                # 외부 카메라에서 본 6번-7번 간 벡터와 거리
-                external_6_7_vec = external_6_depth['position'] - external_7_depth['position']
-                external_depth_distance = np.linalg.norm(external_6_7_vec)
-                
-                # 7번 위치에서 본 6번 마커 위치와 거리
-                d435_6_pos = np.array([
-                    self.d435_depth_6_pose.position.x,
-                    self.d435_depth_6_pose.position.y,
-                    self.d435_depth_6_pose.position.z
-                ])
-                d435_depth_distance = np.linalg.norm(d435_6_pos)
-                
-                # 거리 차이와 좌표별 차이
-                depth_distance_diff = abs(external_depth_distance - d435_depth_distance)
-                coord_diff = external_6_7_vec - d435_6_pos
-                
-                # Depth 결과 표시
-                cv2.putText(frame, f"External 6-7 distance: {external_depth_distance:.3f}m", 
-                           (10, y_pos), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 200, 255), 1)
-                y_pos += 20
-                cv2.putText(frame, f"D435 to marker 6: {d435_depth_distance:.3f}m", 
-                           (10, y_pos), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 200, 255), 1)
-                y_pos += 20
-                cv2.putText(frame, f"Total distance diff: {depth_distance_diff:.3f}m", 
-                           (10, y_pos), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 255), 2)
-                y_pos += 20
-                cv2.putText(frame, f"Coord diff: dx={coord_diff[0]:.3f}, dy={coord_diff[1]:.3f}, dz={coord_diff[2]:.3f}", 
-                           (10, y_pos), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 0, 255), 1)
-            else:
-                cv2.putText(frame, "Depth data not available", 
-                           (10, y_pos), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (100, 100, 100), 1)
-                y_pos += 25
-            
-            # === 방법별 비교 (ArUco vs Depth) ===
-            if (external_6_aruco['valid'] and external_7_aruco['valid'] and 
-                external_6_depth['valid'] and external_7_depth['valid'] and 
-                self.d435_aruco_6_pose is not None and self.d435_depth_6_pose is not None):
-                
-                y_pos += 10
-                cv2.putText(frame, "=== Method Comparison ===", 
-                           (10, y_pos), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
-                y_pos += 25
-                
-                # 외부 카메라의 ArUco vs Depth 차이
-                ext_aruco_vec = external_6_aruco['position'] - external_7_aruco['position']
-                ext_depth_vec = external_6_depth['position'] - external_7_depth['position']
-                ext_aruco_dist = np.linalg.norm(ext_aruco_vec)
-                ext_depth_dist = np.linalg.norm(ext_depth_vec)
-                ext_method_diff = abs(ext_aruco_dist - ext_depth_dist)
-                
-                # D435 카메라의 ArUco vs Depth 차이
-                d435_aruco_pos = np.array([
-                    self.d435_aruco_6_pose.position.x,
-                    self.d435_aruco_6_pose.position.y,
-                    self.d435_aruco_6_pose.position.z
-                ])
-                d435_depth_pos = np.array([
-                    self.d435_depth_6_pose.position.x,
-                    self.d435_depth_6_pose.position.y,
-                    self.d435_depth_6_pose.position.z
-                ])
-                d435_aruco_dist = np.linalg.norm(d435_aruco_pos)
-                d435_depth_dist = np.linalg.norm(d435_depth_pos)
-                d435_method_diff = abs(d435_aruco_dist - d435_depth_dist)
-                
-                cv2.putText(frame, f"External ArUco vs Depth: {ext_method_diff:.3f}m", 
-                           (10, y_pos), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1)
-                y_pos += 18
-                cv2.putText(frame, f"D435 ArUco vs Depth: {d435_method_diff:.3f}m", 
-                           (10, y_pos), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1)
-    
-    def show_results(self):
         """결과 시각화"""
         if self.display_image is not None:
             # 정보 패널 추가
             info_text = [
                 f"Target Markers: {self.target_markers}",
                 f"Marker Size: {self.marker_size * 1000}mm",
-                "Press 'q' to quit"
+                "Press 'q' to quit and show graph"  # 메시지 수정
             ]
+            
+            # 현재 수집 상태 표시
+            aruco_count = len(self.external_aruco_distances)
+            aruco_depth_count = len(self.external_aruco_depth_distances)
+            total_aruco_avgs = len(self.avg_history['aruco_aruco_diff'])
+            total_aruco_depth_avgs = len(self.avg_history['aruco_depth_diff'])
+            
+            info_text.extend([
+                f"ArUco samples: {aruco_count}/100 (Avgs: {total_aruco_avgs})",
+                f"ArUco-Depth samples: {aruco_depth_count}/100 (Avgs: {total_aruco_depth_avgs})"
+            ])
             
             for i, text in enumerate(info_text):
                 cv2.putText(self.display_image, text, (10, 30 + i * 25),
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
             
             # 이미지 표시
             cv2.imshow('D435 ArUco Tracker', self.display_image)
@@ -661,11 +616,58 @@ class D435ArUcoTracker(Node):
             if key == ord('q'):
                 self.show_display = False
                 cv2.destroyAllWindows()
+                
+                # 그래프 표시
+                self.get_logger().info("이미지 창을 닫고 그래프를 표시합니다...")
+                self.show_final_graph()
+                
+                # ROS2 종료
                 rclpy.shutdown()
-    
+        
+    def show_results(self):
+        """결과 시각화 - 수집 상태 표시 업데이트"""
+        if self.display_image is not None:
+            info_text = [
+                f"Target Markers: {self.target_markers}",
+                f"Marker Size: {self.marker_size * 1000}mm", 
+                "Press 'q' to quit and show graph"
+            ]
+            
+            # 현재 수집 상태 표시 (4개 비교 모두)
+            aa_count = len(self.external_aruco_distances)
+            ad_count = len(self.external_aruco_depth_distances) 
+            da_count = len(self.external_depth_aruco_distances)
+            dd_count = len(self.external_depth_depth_distances)
+            
+            aa_avgs = len(self.avg_history['aruco_aruco_diff'])
+            ad_avgs = len(self.avg_history['aruco_depth_diff'])
+            da_avgs = len(self.avg_history['depth_aruco_diff']) 
+            dd_avgs = len(self.avg_history['depth_depth_diff'])
+            
+            info_text.extend([
+                f"ArUco-ArUco: {aa_count}/100 (Avgs: {aa_avgs})",
+                f"ArUco-Depth: {ad_count}/100 (Avgs: {ad_avgs})",
+                f"Depth-ArUco: {da_count}/100 (Avgs: {da_avgs})",
+                f"Depth-Depth: {dd_count}/100 (Avgs: {dd_avgs})"
+            ])
+            
+            for i, text in enumerate(info_text):
+                cv2.putText(self.display_image, text, (10, 30 + i * 25),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
+            
+            cv2.imshow('D435 ArUco Tracker', self.display_image)
+            
+            key = cv2.waitKey(1) & 0xFF
+            if key == ord('q'):
+                self.show_display = False
+                cv2.destroyAllWindows()
+                self.get_logger().info("이미지 창을 닫고 그래프를 표시합니다...")
+                self.show_final_graph()
+                rclpy.shutdown()
+
     def run(self):
         """메인 실행 루프"""
-        self.get_logger().info("ArUco 마커 추적 시작... 'q'를 눌러 종료")
+        self.get_logger().info("ArUco 마커 추적 시작... 'q'를 눌러 종료하고 그래프 표시")
         
         try:
             while rclpy.ok() and self.show_display:
@@ -673,6 +675,12 @@ class D435ArUcoTracker(Node):
                 
         except KeyboardInterrupt:
             self.get_logger().info("프로그램이 중단되었습니다.")
+            # 중단되어도 그래프 표시 - 키 이름 수정
+            if (len(self.avg_history['aruco_aruco_diff']) > 0 or 
+                len(self.avg_history['aruco_depth_diff']) > 0 or
+                len(self.avg_history['depth_aruco_diff']) > 0 or
+                len(self.avg_history['depth_depth_diff']) > 0):
+                self.show_final_graph()
         
         finally:
             # 리소스 정리

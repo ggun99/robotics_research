@@ -1,0 +1,1 @@
+ros2 launch realsense2_camera rs_launch.py depth_module.profile:=640x480x30 enable_sync:=true align_depth:=true

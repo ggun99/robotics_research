@@ -340,7 +340,7 @@ class D435ArucoDetectorWithExtrinsic(Node):
                 
                 self.get_logger().info(f"🤖 Robot center (cam): {robot_center_cam}")
                 self.get_logger().info(f"🌍 Robot center (world): {robot_center_world}")
-                self.publish_robot_center(robot_center_world, len(robot_markers_cam))
+                self.publish_robot_center(robot_center_world, H_world2robot)
 
     def calculate_robot_center_from_single_marker(self, robot_markers_cam):
         """하나의 마커를 기준으로 로컬 좌표계 오프셋을 이용해 로봇 중심 계산"""
@@ -651,7 +651,7 @@ class D435ArucoDetectorWithExtrinsic(Node):
             self.get_logger().debug(f"Could not get relative position: {e}")
             return None, None
 
-    def publish_robot_center(self, center, num_markers):
+    def publish_robot_center(self, center, H_world2robot):
         """로봇 중심 위치 발행"""
         msg = PoseStamped()
         msg.header = Header()
@@ -661,7 +661,14 @@ class D435ArucoDetectorWithExtrinsic(Node):
         msg.pose.position.x = float(center[0])
         msg.pose.position.y = float(center[1])
         msg.pose.position.z = float(center[2])
-        msg.pose.orientation.w = 1.0
+
+        r_world2robot = H_world2robot[0:3, 0:3]
+        rot = R.from_matrix(r_world2robot)
+        quat = rot.as_quat()  # [x, y, z, w]
+        msg.pose.orientation.x = quat[0]
+        msg.pose.orientation.y = quat[1]   
+        msg.pose.orientation.z = quat[2]
+        msg.pose.orientation.w = quat[3]
         
         self.robot_center_pub.publish(msg)
 
