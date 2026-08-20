@@ -1,0 +1,70 @@
+statistics:
+  all_baselines:
+  - !!python/object/apply:numpy.core.multiarray.scalar
+    - &id001 !!python/object/apply:numpy.dtype
+      args:
+      - f8
+      - false
+      - true
+      state: !!python/tuple
+      - 3
+      - <
+      - null
+      - null
+      - null
+      - -1
+      - -1
+      - 0
+    - !!binary |
+      F+IvYfDbB0A=
+  - !!python/object/apply:numpy.core.multiarray.scalar
+    - *id001
+    - !!binary |
+      vruLCg32B0A=
+  - !!python/object/apply:numpy.core.multiarray.scalar
+    - *id001
+    - !!binary |
+      JvX0RAKnB0A=
+  - !!python/object/apply:numpy.core.multiarray.scalar
+    - *id001
+    - !!binary |
+      RnWdtAUFCEA=
+  - !!python/object/apply:numpy.core.multiarray.scalar
+    - *id001
+    - !!binary |
+      F+7yP0roB0A=
+  - !!python/object/apply:numpy.core.multiarray.scalar
+    - *id001
+    - !!binary |
+      Fp0Q7B1SCEA=
+  - !!python/object/apply:numpy.core.multiarray.scalar
+    - *id001
+    - !!binary |
+      HOu2YdO4B0A=
+  - !!python/object/apply:numpy.core.multiarray.scalar
+    - *id001
+    - !!binary |
+      MAX4ZLDdB0A=
+  - !!python/object/apply:numpy.core.multiarray.scalar
+    - *id001
+    - !!binary |
+      XaBzMv8JCEA=
+  - !!python/object/apply:numpy.core.multiarray.scalar
+    - *id001
+    - !!binary |
+      PVj1oi7ZB0A=
+  - !!python/object/apply:numpy.core.multiarray.scalar
+    - *id001
+    - !!binary |
+      7oFhbDTTB0A=
+  baseline_distance:
+    max_m: 3.0400961344308923
+    mean_m: 2.9888728056393847
+    min_m: 2.956547297215951
+    std_m: 0.021229284885359325
+  num_samples: 11
+  timestamp: '2026-01-09T01:22:39.969393'
+  translation_std:
+    x_m: 0.014689730001923853
+    y_m: 0.02528513969222666
+    z_m: 0.037734141395140273

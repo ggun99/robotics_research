@@ -426,8 +426,8 @@ try:
         
         # 데이터 플롯
         ax.plot(human_trajectory["x"], human_trajectory["y"], 'b--', linewidth=2, label="Target Trajectory (Linear)")
-        ax.scatter(scatter_x, scatter_y, color='orange', s=10, label="End-Effector Trajectory", alpha=0.7)
-        ax.scatter(scatter_mob_x, scatter_mob_y, color='cyan', s=10, label="Mobile Base Trajectory", alpha=0.7)
+        # ax.scatter(scatter_x, scatter_y, color='orange', s=10, label="End-Effector Trajectory", alpha=0.7)
+        # ax.scatter(scatter_mob_x, scatter_mob_y, color='cyan', s=10, label="Mobile Base Trajectory", alpha=0.7)
         
         # 범례와 그리드
         ax.legend(loc='upper right')

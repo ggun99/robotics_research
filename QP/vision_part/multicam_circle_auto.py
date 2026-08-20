@@ -46,7 +46,7 @@ class UR5eController:
             if success:
                 # ✅ 고정 시간 대기 (충분히 길게)
                 print("⏳ 10초 대기 중...")
-                time.sleep(5.0)  # 10초 고정 대기
+                time.sleep(2.5)  # 10초 고정 대기
                 
                 print("✅ Joint1 회전 완료 (시간 기반)")
                 return True

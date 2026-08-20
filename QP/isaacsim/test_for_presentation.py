@@ -33,7 +33,7 @@ import matplotlib.pyplot as plt
 import random
 from RRTPlanner2 import RealTime3DTrajectoryPlanner
 import cvxpy as cp
-
+import time
 
 # # 실제 UR5e 로봇의 DH 파라미터 정의
 # ur5e_dh = DHRobot([
@@ -173,7 +173,9 @@ et_x_values = []
 et_y_values = []
 et_z_values = []
 time_values = []
-
+qp_time = []
+qp_solve_times = []
+qp_num = 0
 
 # Matplotlib 인터랙티브 모드 활성화
 # plt.ion()
@@ -439,12 +441,13 @@ len_cable = 0.03
 w_obs = 0.005
 
 while simulation_app.is_running():
-    world.step(render=True)
+    world.step(render=False)
     if world.is_playing():
         
         if world.current_time_step_index == 0:  
             world.reset()
             reached_default = False  # 시뮬 초기화 시 플래그도 초기화
+        
         current_joint_positions = my_robot.get_joint_positions()[0][aljnu_joint_indices]
         mobile_base_pose, mobile_base_quat = my_robot.get_world_poses(indices = [0])
         x = mobile_base_pose[0][0]
@@ -474,6 +477,7 @@ while simulation_app.is_running():
                 my_robot.switch_control_mode("velocity")
                 print("Reached default position!")
         else:
+            start_time = time.time()
             # mobile base links positions and orientations
             rear_right_wheel_link = "/World/aljnu_mp/rear_right_wheel_link"
             prim_rear_right_wheel = XFormPrim(rear_right_wheel_link)
@@ -592,6 +596,8 @@ while simulation_app.is_running():
                 # 엔드 이펙터 기준의 방향 벡터 (direction_vector)를 월드 좌표계로 변환
                 direction_vector_homogeneous = np.append(direction_vector, 0)  # 방향 벡터는 동차 좌표로 확장 (위치가 아니므로 마지막 값은 0)
                 direction_vector_world = T_e[:3, :3] @ direction_vector_homogeneous[:3]  # 회전 행렬만 적용하여 월드 좌표계로 변환
+                sight_vec = robot_target_position - cur_p
+                sight_vec /= np.linalg.norm(sight_vec)
 
                 # z_axis를 월드 좌표계 기준으로 설정
                 z_axis = direction_vector_world / np.linalg.norm(direction_vector_world)  # 정규화
@@ -671,6 +677,17 @@ while simulation_app.is_running():
 
             points_world = np.array(points_world)  # (num_points, 3) 형태로 변환
             xform_pose = np.vstack((xform_pose, points_world))  # 현재 xform_pose에 점 추가
+            
+
+            cur_z_axis = T_cur[:3, 0]
+
+            # T_cur에서 T_sd로 향하는 단위 벡터
+            direction_vector = T_sd[:3, 3] - T_cur[:3, 3]  # T_cur에서 T_sd로 향하는 벡터
+            direction_unit_vector = direction_vector / np.linalg.norm(direction_vector)  # 단위 벡터
+
+            # 두 벡터 사이의 각도 계산
+            cos_theta = np.dot(cur_z_axis, sight_vec)  # 내적 계산
+            theta = np.arccos(np.clip(cos_theta, -1.0, 1.0))  # 각도 계산 (라디안)
 
             T_bd = np.linalg.inv(T_sb) @ T_sd  
             # print("T_bd:", T_bd)
@@ -768,7 +785,7 @@ while simulation_app.is_running():
                     J_mb_v_ = J_mb_[:3, :]  # 3x8 자코비안 (선형 속도)
                     # J_mb_arm_v_ = np.hstack([J_mb_v_, np.zeros((3, 6))])
 
-                    d_dot = (-g_vec) @ J_mb_v_ # J_mb_arm_v_
+                    d_dot = (g_vec) @ J_mb_v_ # J_mb_arm_v_
                     
                     A[i, :8] = d_dot 
                     A[i, 8:] = np.zeros((1, 6)) 
@@ -783,7 +800,7 @@ while simulation_app.is_running():
                 elif 3 < i < 10:  # UR5e joints
                     
                     J_mb_arm_v = np.hstack([np.zeros((3, i - 2)), J_mb_v[:3, i - 2: ]])
-                    d_dot = (-g_vec) @ J_mb_arm_v
+                    d_dot = (g_vec) @ J_mb_arm_v
 
                     A[i, :8] = d_dot
                     A[i, 8:] = np.zeros((1, 6)) 
@@ -806,7 +823,7 @@ while simulation_app.is_running():
                     J_mb_v_ = J_mb_[:3, :]  # 3x8 자코비안 (선형 속도)
                     J_mb_arm_v_ = np.hstack([np.zeros((3, 7)), J_mb_v_[:3, 7: ]])
 
-                    d_dot = (-g_vec) @ J_mb_arm_v_
+                    d_dot = (g_vec) @ J_mb_arm_v_
 
                     A[i, :8] = d_dot
                     A[i, 8:] = np.zeros((1, 6)) 
@@ -824,26 +841,41 @@ while simulation_app.is_running():
                 print("Graph saved as 'first_simulation_environment_with_trajectories.png'")
                 first_plot = False
 
-            C = np.concatenate((np.zeros(2), 8.0*J_m.reshape((n_dof - 2,)), np.zeros(6)))
+            
+
             bTe = ur5e_robot.fkine(q[2:], include_base=False).A  
             θε = atan2(bTe[1, -1], bTe[0, -1])
             weight_param = np.sum(np.abs(human_goal_position - T_e[:3, 3]))
-            # weight = 0.8 * np.sum(np.abs(human_goal_position - T_e[:3, 3]))  # 목표 위치와 현재 위치의 차이
-            if weight_param < 0.5:
-                k_e = 1.0
-            else:
-                k_e = 6.0
-            # C[0] = - weight * θε  # 베이스 x 위치 오차
-            C[0] = - k_e * θε  # 베이스 x 위치 오차
-            # C *= weight
-
-            lambda_max = 0.32
+            lambda_max = 5.
             min_distance = np.min(min_dist_list)  # 장애물과의 최소 거리
-            lambda_c = (lambda_max /(d_influence - d_safe)**2) * (min_distance - d_influence)**2
+            if min_distance <= d_influence :
+                lambda_c = (lambda_max /(d_influence - d_safe)**2) * (min_distance - d_influence)**2
+            else:
+                lambda_c = 0.0
             J_c = lambda_c * J_dj/w_p_sum
+            # print("w_p_sum:", w_p_sum)
+            C1 = np.concatenate((np.zeros(2), -J_m.reshape((n_dof - 2,)), np.zeros(6)))
+            C2 = np.zeros(n_dof + 6)
+            C2[0] = - 5. * θε  # 베이스 x 위치 오차
+            C3 = J_c # 베이스 조인트 속도에 대한 제약 조건 추가
+            C4 = np.concatenate((np.zeros(5), np.ones((n_dof - 5)), np.zeros(6)))
+            # C4[4:] *= 1./np.abs(np.degrees(theta)) 
+            epsilon = 1e-6  # 최소 허용 값
+            C4[4:] -= 1.5 / np.maximum(np.abs(np.degrees(theta)), epsilon)
+            
+            w1 = 1.0 
+            w2 = 0.5
+            w3 = 0.2
+            w4 = 0.2
+            C = w1 * C1 + w2 * C2 + w3 * C3 + w4 * C4
+
+            # lambda_max = 0.32
+            # min_distance = np.min(min_dist_list)  # 장애물과의 최소 거리
+            # lambda_c = (lambda_max /(d_influence - d_safe)**2) * (min_distance - d_influence)**2
+            # J_c = lambda_c * J_dj/w_p_sum
             # J_c = J_dj/w_p_sum
 
-            C += J_c # 베이스 조인트 속도에 대한 제약 조건 추가
+            # C += J_c # 베이스 조인트 속도에 대한 제약 조건 추가
             
             J_ = np.c_[J_mb, np.eye(6)]  # J_ 행렬 (예시)
 
@@ -865,27 +897,37 @@ while simulation_app.is_running():
             lb = -np.r_[qdlim[: n_dof], 10 * np.ones(6)]
             ub = np.r_[qdlim[: n_dof], 10 * np.ones(6)]
             # print(f"Qshape: {Q.shape}, C shape: {C.shape}, A shape: {A.shape}, B shape: {B.shape}, J_ shape: {J_.shape}, v shape: {v.shape}, lb shape: {lb.shape}, ub shape: {ub.shape}")
-            qd = qp.solve_qp(Q,C,A,B,J_,v,lb=lb, ub=ub, solver='quadprog')
-            # x_ = cp.Variable(n_dof+6) 
+            
+            # qd = qp.solve_qp(Q,C,A,B,J_,v,lb=lb, ub=ub, solver='quadprog')
+            x_ = cp.Variable(n_dof+6) 
 
             # # 5. 목적함수
-            # objective = cp.Minimize(0.5 * cp.quad_form(x_, Q) + C.T @ x_)
-            # # 예시 제약조건 (속도 제한 등)
-            # constraints = [
-            #     x_ >= lb,
-            #     x_ <= ub,
-            #     # cp.abs(s) <= 0.1,  # 슬랙이 너무 커지는 걸 방지 (선택 사항)
-            #     A @ x_ <= B,  # 예시 제약조건 (속도 제한 등)
-            #     J_ @ x_ == v,  # 엔드이펙터 속도 추종
-            # ]
+            objective = cp.Minimize(0.5 * cp.quad_form(x_, Q) + C.T @ x_)
+            # 예시 제약조건 (속도 제한 등)
+            constraints = [
+                x_ >= lb,
+                x_ <= ub,
+                # cp.abs(s) <= 0.1,  # 슬랙이 너무 커지는 걸 방지 (선택 사항)
+                A @ x_ <= B,  # 예시 제약조건 (속도 제한 등)
+                J_ @ x_ == v,  # 엔드이펙터 속도 추종
+            ]
 
             # # 풀기
-            # prob = cp.Problem(objective, constraints)
-            # prob.solve()
+            prob = cp.Problem(objective, constraints)
+            qp_solve_start = time.time()
+            prob.solve(solver=cp.ECOS)
+            qp_solve_end = time.time()
+            qp_solve_duration = qp_solve_end - qp_solve_start
+            qp_solve_times.append(qp_solve_duration)
 
             # 결과
-            # qd = x_.value
+            qd = x_.value
             
+            # 현재 시뮬레이션 시간
+            current_time = time.time()
+            real_current_time = current_time - start_time
+            qp_time.append(real_current_time)
+            qp_num += 1
 
             if qd is None:
                 print("QP solution is None")
@@ -917,10 +959,10 @@ while simulation_app.is_running():
                     plt.savefig("simulation_environment_with_trajectories.png")
                     print("Graph saved as 'simulation_environment_with_trajectories.png'")
                     plt.close()
+                    print(f'Average QP solve time: {np.mean(qp_solve_times):.6f} seconds over {qp_num} solves')
+                    print(f'average qp time: {np.mean(qp_time):.6f} seconds')
 
-            # 현재 시뮬레이션 시간
-            current_time = world.current_time
-
+            
             # Translational error 분리
             et_x = np.abs(eTep[0, -1])
             et_y = np.abs(eTep[1, -1])

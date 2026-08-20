@@ -12,6 +12,8 @@ from scipy.spatial.transform import Rotation as R
 from tf2_ros import TransformBroadcaster, StaticTransformBroadcaster  # ✅ TF2 추가
 from butter import RealtimeButterworthFilter
 
+# import tf_transformations  # ✅ TF 변환 유틸리티
+
 class World_Robot(Node):
     def __init__(self):
         super().__init__('world_robot')
@@ -53,7 +55,7 @@ class World_Robot(Node):
             '/camera3/camera3/color/camera_info',
             self.camera3_info_callback,
             1)
-        # self.hand_pose_sub = self.create_subscription(Pose, '/hand_pose', self.hand_pose_callback, 10)
+        
         self.robot_pose_pub = self.create_publisher(Pose, '/mobile_base/pose', 10)
 
         self.create_timer(0.1, self.loop)
@@ -70,8 +72,7 @@ class World_Robot(Node):
         self.H_cam2_to_cam1 = None
         self.H_cam2_to_cam3 = None
         
-        self.butter_filter = [RealtimeButterworthFilter(order=1, cutoff=10.0, fs=30.0), RealtimeButterworthFilter(order=1, cutoff=10.0, fs=30.0), RealtimeButterworthFilter(order=1, cutoff=10.0, fs=30.0)]
-
+        self.base_filter = [RealtimeButterworthFilter(order=1, cutoff=5.0, fs=30.0), RealtimeButterworthFilter(order=1, cutoff=5.0, fs=30.0), RealtimeButterworthFilter(order=1, cutoff=5.0, fs=30.0)]
 
     def publish_transforms(self, H_world_to_robot_results):
         """동적 TF 변환 발행"""
@@ -90,6 +91,34 @@ class World_Robot(Node):
                 # 위치 추출
                 translation = H_matrix[:3, 3]
                 
+                filtered_translation = np.array(translation, dtype=float)
+                try:
+                    if hasattr(self, 'base_filter') and len(self.base_filter) >= 3:
+                        for i in range(3):
+                            filt = self.base_filter[i]
+                            val = float(translation[i])
+                            # try common method names for filter API
+                            try:
+                                filtered_val = filt.apply(val)
+                            except Exception:
+                                try:
+                                    filtered_val = filt.filter(val)
+                                except Exception:
+                                    try:
+                                        filtered_val = filt.update(val)
+                                    except Exception:
+                                        try:
+                                            filtered_val = filt.step(val)
+                                        except Exception:
+                                            filtered_val = val
+                            filtered_translation[i] = float(filtered_val)
+                except Exception as _e:
+                    # on any filter failure, fallback to raw translation
+                    filtered_translation = np.array(translation, dtype=float)
+
+                # use filtered translation for publishing/averaging below
+                translation_to_use = filtered_translation
+
                 # 회전 행렬에서 quaternion 변환
                 rotation_matrix = H_matrix[:3, :3]
                 quaternion = self.rotation_matrix_to_quaternion(rotation_matrix)
@@ -100,9 +129,9 @@ class World_Robot(Node):
                 transform.header.frame_id = 'world'
                 transform.child_frame_id = f'robot_from_{cam_name}'
                 
-                transform.transform.translation.x = float(translation[0])
-                transform.transform.translation.y = float(translation[1])
-                transform.transform.translation.z = float(translation[2])
+                transform.transform.translation.x = float(translation_to_use[0])
+                transform.transform.translation.y = float(translation_to_use[1])
+                transform.transform.translation.z = float(translation_to_use[2])
                 
                 transform.transform.rotation.x = float(quaternion[0])
                 transform.transform.rotation.y = float(quaternion[1])
@@ -184,16 +213,6 @@ class World_Robot(Node):
     def camera3_info_callback(self, msg:CameraInfo):
         if self.camera3_info is None:
             self.camera3_info = msg
-
-    # def hand_pose_callback(self, msg:Pose):
-    #     filtered_hand_pose = [
-    #             f.update(v) for f, v in zip(self.cable_filter,
-    #                                     [msg.position.x,
-    #                                         msg.position.y,
-    #                                         msg.position.z])
-    #         ]
-
-    # def cable_pose
 
     def loop(self):
         if self.H_cam1_to_cam2 is None:
@@ -281,7 +300,6 @@ class World_Robot(Node):
                 pass
                 # available_results['cam1'] = (t_robot_cam1, R_robot_cam1)
             else:
-                t_robot_cam1 = [f.update(v) for f, v in zip(self.butter_filter, t_robot_cam1)]
                 H_cam1_to_robot_original = self._conver_tR_to_H(t_robot_cam1, R_robot_cam1)  # cam1 -> robot (원본)
                 # ✅ X축 기준 180도 회전 적용
                 H_cam1_to_robot = H_cam1_to_robot_original #@ R_x_180  # 회전된 robot 좌표계
@@ -292,7 +310,6 @@ class World_Robot(Node):
             if num_aruco_cam2 <= MIN_MARKERS_DETECTED:
                 pass
             else:
-                t_robot_cam2 = [f.update(v) for f, v in zip(self.butter_filter, t_robot_cam2)]
                 H_cam2_to_robot_original = self._conver_tR_to_H(t_robot_cam2, R_robot_cam2)  # cam2 -> robot (원본)
                 # ✅ X축 기준 180도 회전 적용
                 H_cam2_to_robot = H_cam2_to_robot_original #@ R_x_180  # 회전된 robot 좌표계
@@ -303,7 +320,6 @@ class World_Robot(Node):
             if num_aruco_cam3 <= MIN_MARKERS_DETECTED:
                 pass
             else:
-                R_robot_cam3 = [f.update(v) for f, v in zip(self.butter_filter, R_robot_cam3)]
                 H_cam3_to_robot_original = self._conver_tR_to_H(t_robot_cam3, R_robot_cam3)  # cam3 -> robot (원본)
                 # ✅ X축 기준 180도 회전 적용
                 H_cam3_to_robot = H_cam3_to_robot_original #@ R_x_180  # 회전된 robot 좌표계
@@ -465,7 +481,141 @@ class World_Robot(Node):
         else:
             cv2.putText(display_img_3, "Robot ArUco: NOT DETECTED", (10, 30), font, font_scale, (0, 0, 255), thickness)
         
-        
+        # # 비교 결과 표시 (Camera 2 World 이미지에)
+        # y_offset = 90
+
+        # # ✅ 평균 위치 계산 및 표시
+        # if len(H_world_to_robot_results) >= 1:
+        #     # 모든 유효한 카메라의 위치 및 회전 수집
+        #     x_positions = []
+        #     y_positions = []
+        #     z_positions = []
+        #     rotation_matrices = []
+            
+        #     for cam_name, H_matrix in H_world_to_robot_results.items():
+        #         if H_matrix is not None:
+        #             x_positions.append(H_matrix[0, 3])
+        #             y_positions.append(H_matrix[1, 3])
+        #             z_positions.append(H_matrix[2, 3])
+        #             rotation_matrices.append(H_matrix[:3, :3])  # 회전 행렬 추가
+            
+        #     if len(x_positions) > 0:
+        #         # 평균 위치 계산
+        #         avg_x = np.mean(x_positions) 
+        #         avg_y = np.mean(y_positions) 
+        #         avg_z = np.mean(z_positions)
+                
+        #         # ✅ 평균 회전 계산
+        #         avg_rotation_matrix = self.average_rotations(rotation_matrices)
+        #         avg_quaternion = self.rotation_matrix_to_quaternion(avg_rotation_matrix)
+                
+        #         # ✅ Pose 메시지 생성
+        #         mobile_base_pose = Pose()
+        #         mobile_base_pose.position.x = float(avg_x)
+        #         mobile_base_pose.position.y = float(avg_y)
+        #         mobile_base_pose.position.z = float(avg_z)
+
+        #         # ✅ 평균 orientation 설정
+        #         mobile_base_pose.orientation.x = float(avg_quaternion[0])  # x
+        #         mobile_base_pose.orientation.y = float(avg_quaternion[1])  # y
+        #         mobile_base_pose.orientation.z = float(avg_quaternion[2])  # z
+        #         mobile_base_pose.orientation.w = float(avg_quaternion[3])  # w
+                
+        #         self.robot_pose_pub.publish(mobile_base_pose)
+
+        #         # ✅ 위치 표준편차 계산
+        #         std_x = np.std(x_positions) if len(x_positions) > 1 else 0.0
+        #         std_y = np.std(y_positions) if len(y_positions) > 1 else 0.0
+        #         std_z = np.std(z_positions) if len(z_positions) > 1 else 0.0
+                
+        #         # ✅ 회전 불확실성 계산 (각 회전 행렬과 평균의 차이)
+        #         rotation_uncertainties = []
+        #         if len(rotation_matrices) > 1:
+        #             for R_mat in rotation_matrices:
+        #                 # 두 회전 행렬 간의 각도 차이 계산
+        #                 R_diff = avg_rotation_matrix.T @ R_mat
+        #                 angle_diff = np.arccos(np.clip((np.trace(R_diff) - 1) / 2, -1.0, 1.0))
+        #                 rotation_uncertainties.append(np.degrees(angle_diff))
+                    
+        #             rotation_std = np.std(rotation_uncertainties)
+        #         else:
+        #             rotation_std = 0.0
+                
+        #         # 위치 정확도 (표준편차의 크기)
+        #         position_uncertainty = np.sqrt(std_x**2 + std_y**2 + std_z**2) * 1000  # mm
+                
+        #         # ✅ 오일러 각도로 변환 (표시용)
+        #         euler_angles = R.from_quat(avg_quaternion).as_euler('xyz', degrees=True)
+                
+        #         # 로봇 위치 및 방향 표시
+        #         cv2.putText(display_img_2_world, f"Robot Pose (from {len(x_positions)} cameras):", 
+        #             (10, y_offset), font, font_scale, (0, 255, 255), thickness)
+        #         y_offset += 30
+                
+        #         cv2.putText(display_img_2_world, f"X: {avg_x:.3f}m (±{std_x*1000:.1f}mm)", 
+        #             (10, y_offset), font, 0.5, (0, 255, 255), 2)
+        #         y_offset += 25
+                
+        #         cv2.putText(display_img_2_world, f"Y: {avg_y:.3f}m (±{std_y*1000:.1f}mm)", 
+        #             (10, y_offset), font, 0.5, (0, 255, 255), 2)
+        #         y_offset += 25
+                
+        #         cv2.putText(display_img_2_world, f"Z: {avg_z:.3f}m (±{std_z*1000:.1f}mm)", 
+        #             (10, y_offset), font, 0.5, (0, 255, 255), 2)
+        #         y_offset += 25
+                
+        #         # ✅ 방향 정보 추가
+        #         cv2.putText(display_img_2_world, f"Roll: {euler_angles[0]:.1f}° (±{rotation_std:.1f}°)", 
+        #             (10, y_offset), font, 0.5, (255, 200, 100), 2)
+        #         y_offset += 25
+                
+        #         cv2.putText(display_img_2_world, f"Pitch: {euler_angles[1]:.1f}° (±{rotation_std:.1f}°)", 
+        #             (10, y_offset), font, 0.5, (255, 200, 100), 2)
+        #         y_offset += 25
+                
+        #         cv2.putText(display_img_2_world, f"Yaw: {euler_angles[2]:.1f}° (±{rotation_std:.1f}°)", 
+        #             (10, y_offset), font, 0.5, (255, 200, 100), 2)
+        #         y_offset += 25
+                
+        #         # 전체 불확실성
+        #         if len(x_positions) > 1:
+        #             cv2.putText(display_img_2_world, f"Pos Uncertainty: ±{position_uncertainty:.1f}mm", 
+        #                 (10, y_offset), font, 0.5, (255, 128, 0), 2)
+        #             y_offset += 25
+        #             cv2.putText(display_img_2_world, f"Rot Uncertainty: ±{rotation_std:.1f}°", 
+        #                 (10, y_offset), font, 0.5, (255, 128, 0), 2)
+        #             y_offset += 25
+                
+        #         # 품질 평가 (위치 + 회전 고려)
+        #         overall_uncertainty = position_uncertainty + rotation_std * 5  # 회전은 5mm/degree로 가중
+        #         if overall_uncertainty < 15:
+        #             quality_text = "Quality: Excellent"
+        #             quality_color = (0, 255, 0)  # 초록
+        #         elif overall_uncertainty < 50:
+        #             quality_text = "Quality: Good"  
+        #             quality_color = (0, 255, 255)  # 노랑
+        #         else:
+        #             quality_text = "Quality: Poor"
+        #             quality_color = (0, 0, 255)  # 빨강
+                    
+        #         cv2.putText(display_img_2_world, quality_text, 
+        #             (10, y_offset), font, 0.5, quality_color, 2)
+                
+        #         # ✅ 로그에도 평균 위치 및 방향 출력
+        #         if hasattr(self, '_log_counter'):
+        #             self._log_counter += 1
+        #         else:
+        #             self._log_counter = 1
+                    
+        #         if self._log_counter % 50 == 0:  # 50회마다 로그 출력
+        #             self.get_logger().info(
+        #                 f"Robot Pose: Pos=[{avg_x:.3f}, {avg_y:.3f}, {avg_z:.3f}]m ±{position_uncertainty:.1f}mm, "
+        #                 f"Rot=[{euler_angles[0]:.1f}, {euler_angles[1]:.1f}, {euler_angles[2]:.1f}]° ±{rotation_std:.1f}°"
+        #             )
+
+        # else:
+        #     cv2.putText(display_img_2_world, "No robot detected", 
+        #         (10, y_offset), font, font_scale, (0, 0, 255), thickness)
         
         # 이미지 크기 조정 (화면에 맞게)
         scale = 0.6

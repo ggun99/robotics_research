@@ -33,10 +33,15 @@ class QP_mbcontorller(Node):
         super().__init__('mbcontroller')
         self.ROBOT_IP = '192.160.0.4'
         # RTDE 수신 객체 생성
-        self.rtde_r = rtde_receive.RTDEReceiveInterface(self.ROBOT_IP)
-        # RTDE Control Interface 초기화
-        self.rtde_c = rtde_control.RTDEControlInterface(self.ROBOT_IP)
-        
+        try:
+            # RTDE Control Interface 초기화
+            self.rtde_c = rtde_control.RTDEControlInterface(self.ROBOT_IP)
+            # RTDE Receive Interface 초기화
+            self.rtde_r = rtde_receive.RTDEReceiveInterface(self.ROBOT_IP)
+            print(f"✅ UR 로봇 연결 성공 (IP: {self.ROBOT_IP})")
+        except Exception as e:
+            print(f"❌ UR 로봇 연결 실패: {e}")
+            sys.exit(1)
         self.ur5e_robot = rtb.models.UR5()
         self.n_dof = 8 # base(2) + arm(6)
         self.base_position = self.create_subscription(Pose, '/mobile_base/pose', self.set_base_position, 10)
@@ -54,7 +59,7 @@ class QP_mbcontorller(Node):
         self.d_influence = 2.0
         self.current_joint_positions = None
         self.q = None
-        # self.num_points = 10
+        self.num_points = 10
         self.obstacle_radius = 0.25
         self.lambda_max = 0.32
         self.dt = 0.05
@@ -66,11 +71,6 @@ class QP_mbcontorller(Node):
         self.butter_x = RealtimeButterworthFilter(order=1, cutoff=10.0, fs=30.0)
         self.butter_y = RealtimeButterworthFilter(order=1, cutoff=10.0, fs=30.0)
         self.butter_z = RealtimeButterworthFilter(order=1, cutoff=10.0, fs=30.0)
-        self.butter_hand_x = RealtimeButterworthFilter(order=1, cutoff=10.0, fs=30.0)
-        self.butter_hand_y = RealtimeButterworthFilter(order=1, cutoff=10.0, fs=30.0)
-        self.butter_hand_z = RealtimeButterworthFilter(order=1, cutoff=10.0, fs=30.0)
-        self.cable_filter = [RealtimeButterworthFilter(order=1, cutoff=10.0, fs=30.0), RealtimeButterworthFilter(order=1, cutoff=10.0, fs=30.0), RealtimeButterworthFilter(order=1, cutoff=10.0, fs=30.0)]
-        
         self.human_position = None
         self.obstacles_positions= np.array([5.0,5.0,1.0])
         self.points_between= None
@@ -78,15 +78,14 @@ class QP_mbcontorller(Node):
         self.robot_collision_check= []
         self.lambda_h_a_param = 0.3
         self.w1 = 0.2
-        self.w2 = 0.5
+        self.w2 = 0.2
         self.w3 = 0.0
         self.w4 = 0.0
         # 로봇 링크별 충돌 검사 점들 정의
         self.define_robot_collision_points()
 
         self.cable_points = []
-        self.obstacles_positions = np.array([[1.25,4.0, 1.]])
-
+        
         # 궤적 추종 관련 Publisher/Subscriber 추가
         self.next_waypoint_publisher = self.create_publisher(Bool, '/next_waypoint_trigger', 10)
         self.trajectory_status_sub = self.create_subscription(
@@ -103,19 +102,17 @@ class QP_mbcontorller(Node):
         self.target_reached_time = None
         
         self.ee_rotation = False
+        self.qp_time = []
+        self.qp_solve_time = []
 
         # End effector 궤적 기록용
+        self.base_trajectory = {'x': [], 'y': [], 'timestamps': []}
         self.ee_trajectory = {'x': [], 'y': [], 'timestamps': []}
         self.desired_trajectory = {'x': [], 'y': [], 'timestamps': []}
         self.last_desired_position = None
         self.start_time = time.time()
-        self.obj_timestamps = []
-        self.obj_total = []
-        self.obj_Qterm = []
-        self.obj_C1 = []
-        self.obj_C2 = []
-        self.obj_C3 = []
-        self.obj_C4 = []
+        self.start_memory = False
+        self.et_memory = []
         
         print("🎯 궤적 추종 시스템 초기화 완료")
 
@@ -124,17 +121,17 @@ class QP_mbcontorller(Node):
         
         # UR5e 각 링크의 충돌 검사 점들 (링크 프레임 기준)
         self.ur5e_link_points = {
-            # 'base': np.array([
-            #     [0.0, 0.0, 0.0],      # 베이스 중심
-            #     [0.08, 0.08, 0.05],   # 베이스 모서리들
-            #     [-0.08, 0.08, 0.05],
-            #     [0.08, -0.08, 0.05],
-            #     [-0.08, -0.08, 0.05],
-            #     [0.06, 0.0, 0.1],     # 베이스 상단
-            #     [-0.06, 0.0, 0.1],
-            #     [0.0, 0.06, 0.1],
-            #     [0.0, -0.06, 0.1]
-            # ]),
+            'base': np.array([
+                [0.0, 0.0, 0.0],      # 베이스 중심
+                [0.08, 0.08, 0.05],   # 베이스 모서리들
+                [-0.08, 0.08, 0.05],
+                [0.08, -0.08, 0.05],
+                [-0.08, -0.08, 0.05],
+                [0.06, 0.0, 0.1],     # 베이스 상단
+                [-0.06, 0.0, 0.1],
+                [0.0, 0.06, 0.1],
+                [0.0, -0.06, 0.1]
+            ]),
             'shoulder': np.array([
                 [0.0, 0.0, 0.0],
                 [0.06, 0.06, 0.08],
@@ -227,7 +224,47 @@ class QP_mbcontorller(Node):
         self.get_logger().info(f"Distance to target: {distance:.3f} m")
         # self.get_logger().info(f"Current Pos: ({current_pos[0]:.3f}, {current_pos[1]:.3f}, {current_pos[2]:.3f})")
         return distance < self.target_reached_threshold
-
+    
+    def should_trigger_next_waypoint(self, current_ee_pos):
+        """다음 웨이포인트 트리거 여부 판정"""
+        if self.human_position is None:
+            return False
+        
+        # 현재 목표 위치 확인
+        is_near_target = self.check_target_reached(current_ee_pos, self.human_position)
+        
+        # 목표 위치가 변경되었는지 확인 (새 웨이포인트 감지)
+        target_changed = (
+            self.last_target_position is None or 
+            np.linalg.norm(np.array(self.human_position) - np.array(self.last_target_position)) > 0.05
+        )
+        
+        if target_changed:
+            self.last_target_position = self.human_position.copy()
+            self.target_reached = False
+            self.target_reached_time = None
+            print(f"🔄 새 목표 위치 감지: ({self.human_position[0]:.3f}, {self.human_position[1]:.3f}, {self.human_position[2]:.3f})")
+        
+        # 목표 지점 근처에 도달했을 때
+        if is_near_target and not self.target_reached:
+            distance = np.linalg.norm(current_ee_pos - np.array(self.human_position))
+            print(f"🎯 목표 지점 {self.target_reached_threshold}cm 내 도달! 거리: {distance*1000:.1f}mm")
+            print(f"   현재 EE 위치: ({current_ee_pos[0]:.3f}, {current_ee_pos[1]:.3f}, {current_ee_pos[2]:.3f})")
+            print(f"   목표 위치: ({self.human_position[0]:.3f}, {self.human_position[1]:.3f}, {self.human_position[2]:.3f})")
+            
+            self.target_reached = True
+            self.target_reached_time = time.time()
+            return False  # 아직 트리거하지 않음 (디바운스 대기)
+        
+        # 디바운스 시간 경과 후 트리거
+        if (self.target_reached and 
+            self.target_reached_time is not None and 
+            time.time() - self.target_reached_time >= self.target_reached_debounce_time):
+            
+            print("➡️ 다음 웨이포인트 요청! (실제 위치 기반 트리거)")
+            return True
+    
+        return False
     
     def compute_dynamic_robot_collision_points(self):
         """현재 로봇 상태에서 모든 충돌 검사 점들의 월드 좌표 계산"""
@@ -309,76 +346,37 @@ class QP_mbcontorller(Node):
                 ]
         
     def set_human_position(self, msg):
-        if self.base_position is None:
-            return
-        buttered_hand_x = self.butter_hand_x.update(msg.position.x)
-        buttered_hand_y = self.butter_hand_y.update(msg.position.y)
-        buttered_hand_z = self.butter_hand_z.update(msg.position.z)
-        self.human_position = [buttered_hand_x, 
-                               buttered_hand_y, 
-                               buttered_hand_z]
+        self.human_position = [msg.position.x, 
+                               msg.position.y, 
+                               msg.position.z]
         
     def set_cable_positions(self, msg):
-        self.cable_points = []
-
-        for pose in msg.poses:
-            filtered = [
-                f.update(v) for f, v in zip(self.cable_filter,
-                                        [pose.position.x,
-                                            pose.position.y,
-                                            pose.position.z])
-            ]
-            self.cable_points.append(filtered)
-        # self.cable_points = [
-        #     (pose.position.x, pose.position.y, pose.position.z)
-        #     for pose in msg.poses
-        # ]
-
-    def get_nearest_obstacle_distance(self, position, obstacles, obstacle_radius):
-        """
-        Calculate the distance to the nearest obstacle from a given position in the end-effector frame.
+        self.cable_points = [
+            (pose.position.x, pose.position.y, pose.position.z)
+            for pose in msg.poses
+        ]
+        # self.points_between
+    # def set_positions(self, msg):
+    #     """
+    #     Set the positions of the rigid bodies from the message.
+    #     This function is called when a new message is received on the '/rigid_bodies' topic.
+    #     """
+    #     # 이름 확인해서 넣는걸로 
         
-        Args:
-            position (np.ndarray): The position in world coordinates.
-            obstacles (list): A list of obstacle positions in world coordinates.
-            obstacle_radius (float): The radius of the obstacles.
-            T_cur (np.ndarray): The transformation matrix from world to the robot base.
-            T (np.ndarray): The transformation matrix from the robot base to the end-effector.
-
-        Returns:
-            float: The distance to the nearest obstacle.
-            int: The index of the nearest obstacle.
-            np.ndarray: The directional vector to the nearest obstacle in the end-effector frame.
-        """
-        # 엔드 이펙터의 변환 행렬
-        # T_e = T_cur @ T  # 월드 좌표계에서 엔드 이펙터 좌표계로의 변환
-        g_vec = np.zeros(3)
-        obstacles_local = []
-        obs_real = []
-        
-        for obs in obstacles:
-            obs[2] = position[2]
-            obs_real.append(obs)
-            # obs_ee = np.append(obs, 1)  # 동차 좌표로 확장
-            # obs_local = np.linalg.inv(T_e) @ obs_homogeneous
-            obstacles_local.append(obs)  # 3차원으로 변환
-            # position_homogeneous = np.append(position, 1)  # 동차 좌표로 확장
-            # position_local = np.linalg.inv(T_e) @ position_homogeneous
-            # position_local = position_local[:3]  # 3차원으로 변환
-            
-        position_ee = position  # 동차 좌표로 확장
-        # position_local = np.linalg.inv(T_e) @ position_homogeneous
-        # position_local = position_ee[:3]  # 3차원으로 변환
-        # position_local = position  # 3차원으로 변환
-        
-        distances = [((np.linalg.norm(position_ee - obse)) - obstacle_radius) for obse in obstacles_local]
-        index = np.argmin(distances)
-
-        g_vec = (position - obs_real[index])
-        g_vec /= np.linalg.norm(g_vec) 
-        # print('g_vec: ', g_vec)
-        return distances, index, g_vec
+    #     self.obstacles_positions = [pose.position.x, 
+    #                             pose.position.y, 
+    #                             pose.position.z]
+    #     self.points_between = [
+    #                             (marker.translation.x, marker.translation.y, marker.translation.z)
+    #                             for marker in markers
+    #                         ]
     
+    
+    #     self.robot_collision_check = [
+    #         (marker.translation.x, marker.translation.y, marker.translation.z)
+    #         for marker in markers
+    #     ]
+
     def joint_velocity_damper(self, 
             ps: float = 0.05,
             pi: float = 0.1,
@@ -428,6 +426,48 @@ class QP_mbcontorller(Node):
 
             return Ain, Bin
 
+    def get_nearest_obstacle_distance(self, position, obstacles, obstacle_radius, T_e):
+        """
+        Calculate the distance to the nearest obstacle from a given position in the end-effector frame.
+        
+        Args:
+            position (np.ndarray): The position in world coordinates.
+            obstacles (list): A list of obstacle positions in world coordinates.
+            obstacle_radius (float): The radius of the obstacles.
+            T_cur (np.ndarray): The transformation matrix from world to the robot base.
+            T (np.ndarray): The transformation matrix from the robot base to the end-effector.
+
+        Returns:
+            float: The distance to the nearest obstacle.
+            int: The index of the nearest obstacle.
+            np.ndarray: The directional vector to the nearest obstacle in the end-effector frame.
+        """
+        # 엔드 이펙터의 변환 행렬
+        # T_e = T_cur @ T  # 월드 좌표계에서 엔ee드 이펙터 좌표계로의 변환
+        obstacles_local = []
+        for obs in obstacles:
+            obs_copy = obs.copy() if isinstance(obs, list) else list(obs)  # 복사본 생성
+            obs_copy[2] = position[2]
+            obs_homogeneous = np.append(obs_copy, 1)  # 동차 좌표로 확장
+            obs_local = np.linalg.inv(T_e) @ obs_homogeneous
+            obstacles_local.append(obs_local[:3])  # 3차원으로 변환
+        obstacles_local = np.array(obstacles_local)
+        # position을 엔드 이펙터 좌표계로 변환
+        
+        
+        position_homogeneous = np.append(position, 1)  # 동차 좌표로 확장
+        position_local = np.linalg.inv(T_e) @ position_homogeneous
+        position_local = position_local[:3]  # 3차원으로 변환
+        
+        distances = [((np.linalg.norm(position_local - obse)) - obstacle_radius) for obse in obstacles_local]
+        index = np.argmin(distances)
+        # 가장 가까운 장애물에 대한 방향 벡터 계산
+
+        g_vec = (position_local - obstacles_local[index])
+        g_vec /= np.linalg.norm(g_vec)  # 방향 벡터 정규화
+
+        return distances, index, g_vec
+
 
     # 비콘을 이용한 3차원 위치
 
@@ -457,7 +497,6 @@ class QP_mbcontorller(Node):
     #     self.q[0] = 0.0
     #     self.q[1] = 0.0 
     #     self.q[2:] = current_joint_positions[4:10]  # UR5e 조인트 위치
-
     def calculate_natural_rotation(self, T_cur, target_position):
 
         cur_z_axis = T_cur[:3, 2]
@@ -493,6 +532,7 @@ class QP_mbcontorller(Node):
 
     # 여기서 ros를 사용한 것으로 변경
     def QP_real(self):
+        start_time = time.time()
         t_start = self.rtde_c.initPeriod()
         # sub the joints values
         current_joint_positions = self.rtde_r.getActualQ() # 실제 현재 joint 위치
@@ -511,7 +551,6 @@ class QP_mbcontorller(Node):
         self.robot_collision_check, num_mobile, num_mani = self.compute_dynamic_robot_collision_points()
         xform_pose = list(self.robot_collision_check)
         num_cable = len(self.cable_points)
-        num_points = num_mobile + num_mani + num_cable
         if num_cable == 0:
             pass
         else: 
@@ -584,16 +623,66 @@ class QP_mbcontorller(Node):
 
         # 로봇이 사람을 따라가기
         T_cur = T_sb @ T_be  # 현재 로봇 위치 (월드 좌표계 기준)
-        self.T_cur = T_cur
         # 현재 엔드이펙터 위치
         current_ee_position = T_cur[:3, 3]
-        
+        current_base_position = T_sb[:3, 3]
         # End effector 궤적 기록
         current_time = time.time() - self.start_time
+        self.base_trajectory['x'].append(current_base_position[0])
+        self.base_trajectory['y'].append(current_base_position[1])
+        self.base_trajectory['timestamps'].append(current_time)
+
         self.ee_trajectory['x'].append(current_ee_position[0])
         self.ee_trajectory['y'].append(current_ee_position[1])
         self.ee_trajectory['timestamps'].append(current_time)
-
+        
+        # Desired position 궤적 기록 (값이 변할 때만)
+        if self.human_position is not None:
+            desired_changed = (
+                self.last_desired_position is None or 
+                np.linalg.norm(np.array(self.human_position) - np.array(self.last_desired_position)) > 0.01  # 1cm 이상 변화
+            )
+            
+            if desired_changed:
+                self.desired_trajectory['x'].append(self.human_position[0])
+                self.desired_trajectory['y'].append(self.human_position[1])
+                self.desired_trajectory['timestamps'].append(current_time)
+                self.last_desired_position = self.human_position.copy()
+                print(f"🎯 새 목표 위치 기록: ({self.human_position[0]:.3f}, {self.human_position[1]:.3f})")
+        
+        # 실제 위치 기반 다음 웨이포인트 트리거 확인
+        if self.should_trigger_next_waypoint(current_ee_position):
+            print("🚀 next_waypoint_trigger 발송!")
+            next_msg = Bool()
+            next_msg.data = True
+            self.next_waypoint_publisher.publish(next_msg)
+            
+            # 상태 리셋
+            self.target_reached = False
+            self.target_reached_time = None
+            self.start_memory = True
+        # # 디버깅 정보 출력 (3초마다로 단축)
+        # if hasattr(self, 'debug_counter'):
+        #     self.debug_counter += 1
+        # else:
+        #     self.debug_counter = 0
+            
+        # if self.debug_counter % 150 == 0:  # 3초마다 출력 (50Hz * 150 = 3초)
+        #     if self.human_position is not None:
+        #         distance_to_target = np.linalg.norm(current_ee_position - np.array(self.human_position))
+        #         print(f"\n📊 [실시간 상태]")
+        #         print(f"   현재 EE: ({current_ee_position[0]:.3f}, {current_ee_position[1]:.3f}, {current_ee_position[2]:.3f})")
+        #         print(f"   목표 위치: ({self.human_position[0]:.3f}, {self.human_position[1]:.3f}, {self.human_position[2]:.3f})")
+        #         print(f"   거리: {distance_to_target*1000:.1f}mm (임계값: {self.target_reached_threshold*1000:.0f}mm)")
+        #         print(f"   웨이포인트: {self.current_waypoint_id}")
+        #         print(f"   도달상태: {self.target_reached}")
+                
+        #         if self.target_reached and self.target_reached_time is not None:
+        #             remaining_time = self.target_reached_debounce_time - (time.time() - self.target_reached_time)
+        #             if remaining_time > 0:
+        #                 print(f"   트리거까지: {remaining_time:.1f}초")
+        #             else:
+        #                 print(f"   트리거 준비 완료!")
         # print(T_cur)
         ppp = list(T_cur[0:3,3])
         # print(ppp)
@@ -601,13 +690,15 @@ class QP_mbcontorller(Node):
         # print(qqq)
         self.make_tf_msg(ppp, qqq, "world", "ee")
 
+
+
         # 엔드 이펙터의 변환 행렬
-        # T_e = T_cur  # 월드 좌표계에서 엔드 이펙터 좌표계로의 변환
+        T_e = T_cur  # 월드 좌표계에서 엔드 이펙터 좌표계로의 변환
 
         # # robot_target_position을 엔드 이펙터 좌표계로 변환
         # robot_target_position_homogeneous = np.append(self.human_position, 1)  # 동차 좌표로 확장
         # robot_target_position_local = np.linalg.inv(T_e) @ robot_target_position_homogeneous
-        # robot_target_position_local = self.human_position  # 3차원으로 변환
+        # robot_target_position_local = robot_target_position_local[:3]  # 3차원으로 변환
 
         # # 현재 엔드 이펙터 위치를 엔드 이펙터 좌표계로 변환 (항상 원점)
 
@@ -643,32 +734,17 @@ class QP_mbcontorller(Node):
             rotation_matrix_normalized = U @ Vt
             T_bd[:3, :3] = rotation_matrix_normalized
 
-        robot_target_position_homogeneous = np.append(self.human_position, 1) 
-        robot_target_position_local = T_cur @ robot_target_position_homogeneous
-        robot_target_position_ee = robot_target_position_local[:3, 3]  # 3차원으로 변환
-
-        T_sd[0, 3] = (robot_target_position_ee[0] + T_cur[0, 3])/2 #robot_target_position[0]
-        T_sd[1, 3] = (robot_target_position_ee[1] + T_cur[1, 3])/2 #robot_target_position[1]
-        T_sd[2, 3] = (robot_target_position_ee[2] + T_cur[2, 3])/2 #robot_target_position[2]
-
-        self.desired_trajectory['x'].append(T_sd[0, 3])
-        self.desired_trajectory['y'].append(T_sd[1, 3])
-        self.desired_trajectory['timestamps'].append(current_time)
-
+        T_sd[0, 3] = self.human_position[0] #robot_target_position[0]
+        T_sd[1, 3] = self.human_position[1] #robot_target_position[1]
+        T_sd[2, 3] = self.human_position[2] #robot_target_position[2]
         ppppp = list(T_sd[0:3,3])
         # print(ppppp)
         qqqqq = R.from_matrix(T_sd[0:3,0:3]).as_quat()
         # print(qqqqq)
         self.make_tf_msg(ppppp, qqqqq, "world", "desired")
 
-        ppppp_ = list(robot_target_position_ee)
-        # print(ppppp)
-        qqqqq_ = R.from_matrix(T_sd[0:3,0:3]).as_quat()
-        # print(qqqqq)
-        self.make_tf_msg(ppppp_, qqqqq_, "world", "human")
-
         # 각도 계산
-        sight_vec = T_cur[:3,0]
+        sight_vec = T_e[:3,0]
         sight_vec /= np.linalg.norm(sight_vec)
         direction_unit_vector = self.human_position - T_cur[:3, 3]
         direction_unit_vector = direction_unit_vector / np.linalg.norm(direction_unit_vector)
@@ -699,6 +775,9 @@ class QP_mbcontorller(Node):
         T_error = np.linalg.inv(H_current.A) @ H_desired.A  # 4x4
         # print(T_error)
         et = np.sum(np.abs(T_error[:3, -1])) 
+        if self.start_memory:
+            self.et_memory.append(et)
+
         # Quadratic component of objective function
         Q = np.eye(self.n_dof + 6)
         # Joint velocity component of Q
@@ -736,105 +815,10 @@ class QP_mbcontorller(Node):
             c = J_a @ np.transpose(H[i, :, :])  # shape: (6,6)
             J_m[i,0] = m_t * np.transpose(c.flatten("F")) @ JJ_inv.flatten("F")
 
-        A = np.zeros((self.n_dof + 2 + num_points, self.n_dof + 6))
-        B = np.zeros(self.n_dof + 2 + num_points)
+        A = np.zeros((self.n_dof + 2 + self.num_points, self.n_dof + 6))
+        B = np.zeros(self.n_dof + 2 + self.num_points)
         # print(f"Ashape: {A.shape}, B shape: {B.shape}")
         
-        J_dj = np.zeros(self.n_dof+6)
-        w_p_sum = 0.0
-        min_dist_list = []  # 장애물과의 최소 거리 리스트
-        g_vec_list = []  # 각 점에서의 장애물 방향 벡터 리스트
-        # 초기화
-        weighted_g_vec = np.zeros(3)  # 가중치가 적용된 방향 벡터의 합
-        total_weight = 0.0  # 총 가중치
-        for i , pose in enumerate(xform_pose) :
-
-            distance, index, g_vec_ = self.get_nearest_obstacle_distance(pose, self.obstacles_positions[:, :3], self.obstacle_radius)
-            min_dist_ = np.min(distance)
-            min_dist_list.append(min_dist_)  # 최소 거리 추가
-            g_vec_list.append(g_vec_)  # 해당 최소 거리의 방향 벡터 추가
-            # 거리 기반 가중치 계산
-            if min_dist_ <= 0.6:
-                weight = 0.15  # 거리가 0.3 이하인 경우 동일한 가중치 부여
-            else:
-                weight = 0. #max(0, 0.1 / (min_dist_ - d_safe + 1e-6))  # 거리의 역수로 가중치 계산
-            weighted_g_vec += weight * g_vec_  # 가중치를 곱한 방향 벡터를 합산
-            total_weight += weight  # 총 가중치 합산
-        # print('min_dist', min_dist_list)
-        # 최종 g_vec 계산 (가중치로 정규화)
-        if total_weight > 0:
-            g_vec = weighted_g_vec / total_weight  # 가중치로 정규화
-        else:
-            g_vec = np.zeros(3)  # 총 가중치가 0인 경우, 기본값으로 설정
-        min_dist = np.min(min_dist_list)
-        min_index = np.argmin(min_dist_list)
-        # print('min_dist:', min_dist)
-        g_vec = g_vec_list[min_index]
-        avoid_vec /= np.linalg.norm(g_vec)
-
-        link1_len = (num_mobile + self.ur5e_link_points['shoulder'][0])
-        link2_len = (link1_len + self.ur5e_link_points['upper_arm'][0])
-        link3_len = (link2_len + self.ur5e_link_points['forearm'][0])
-        link4_len = (link3_len + self.ur5e_link_points['wrist_1'][0])
-        link5_len = (link4_len + self.ur5e_link_points['wrist_2'][0])
-        # link6_len = (link5_len + self.ur5e_link_points['wrist_3'][0])
-
-
-        for i , pose in enumerate(xform_pose) :    
-                if i < num_mobile:  # mobile base wheels
-
-                    d_dot = (avoid_vec) @ J_mb_v   # 장애물 피하는 방향으로의 자코비안
-                    
-                    A[i, :8] = -d_dot 
-                    A[i, 8:] = np.zeros((1, 6)) 
-                    B[i] = (min_dist_list[i] - self.d_safe) / ((self.d_influence - self.d_safe))
-                    # B[i] = (d_influence-min_dist_list[i])/(d_influence-d_safe) 
-                    w_p = (self.d_influence-min_dist_list[i])/(self.d_influence - self.d_safe) 
-                    # print("min_dist_list[i]:", min_dist_list[i])
-                    # print(f"w_p: {w_p}")
-                    # w_p = (min_dist_list[i]-d_influence)/(d_influence-d_safe) 
-                    J_dj[:8] +=  (-d_dot) * (w_p)  # 베이스 조인트 속도에 대한 제약 조건
-                    # print("J_dj[:8]:", J_dj[:8])
-                    # print(f"robot {i}th link Distance: {min_dist:.2f} m")
-                    # print(f"{i}th J_dj : {A[i, :8] * w_p}")
-                    # print(f"{i}th w_p : { w_p}")
-                    w_p_sum += np.abs(w_p)
-                    # if min_dist < 0.0:
-                        # print(f"robot {i+1}th link is too close to an obstacle. Distance: {min_dist:.2f} m")
-                        # print(f"A : {A[i, :8]}")
-                        # print(f"B : {B[i]:.2f}")
-                else:  # UR5e joints
-                    if num_mobile <= i < link1_len: 
-                        J_mb_arm_v = np.hstack([np.zeros((3, 2)), J_a_e[:3, :]])
-                    elif link1_len <= i < link2_len:
-                        J_mb_arm_v = np.hstack([np.zeros((3, 3)), J_a_e[:3, 1:]])
-                    elif link2_len <= i < link3_len:
-                        J_mb_arm_v = np.hstack([np.zeros((3, 4)), J_a_e[:3, 2:]])
-                    elif link3_len <= i < link4_len:
-                        J_mb_arm_v = np.hstack([np.zeros((3, 5)), J_a_e[:3, 3:]])
-                    elif link4_len <= i < link5_len:
-                        J_mb_arm_v = np.hstack([np.zeros((3, 6)), J_a_e[:3, 4:]])
-                    else : 
-                        J_mb_arm_v = np.hstack([np.zeros((3, 7)), J_a_e[:3, 5:]])
-
-                    d_dot = (avoid_vec) @ J_mb_arm_v
-
-                    A[i, :8] = -d_dot
-                    A[i, 8:] = np.zeros((1, 6)) 
-                    B[i] = (min_dist_list[i] - self.d_safe) / ((self.d_influence - self.d_safe))
-                    # B[i] = (d_influence-min_dist_list[i])/(d_influence-d_safe) 
-                    w_p = (self.d_influence-min_dist_list[i])/(self.d_influence - self.d_safe) 
-                    # print("min_dist_list[i]:", min_dist_list[i])
-                    # print(f"w_p: {w_p}")
-                    # w_p = (min_dist_list[i]-d_influence)/(d_influence-d_safe) 
-                    J_dj[:8] += (-d_dot) * (w_p)  # 베이스 조인트 속도에 대한 제약 조건
-                    # print("J_dj[:8]:", J_dj[:8])
-                    # print(f"robot {i}th link Distance: {min_dist:.2f} m")
-                    # print(f"{i}th J_dj : {A[i, :8] * w_p}")
-                    # print(f"{i}th w_p : { w_p}")
-                    w_p_sum += np.abs(w_p)
-
-
         C1 = np.concatenate((np.zeros(2), -J_m.reshape((self.n_dof - 2,)), np.zeros(6)))
         # bTe = self.ur5e_robot.fkine(self.q[2:], include_base=False).A 
         # θε = atan2(bTe[1, -1], bTe[0, -1])
@@ -847,18 +831,19 @@ class QP_mbcontorller(Node):
         except:
             # print('nonono')
             C2 = np.zeros(self.n_dof + 6)
-       
-        lambda_max = 5.
-        min_distance = np.min(min_dist_list)  # 장애물과의 최소 거리
-        if min_distance <= self.d_influence :
-            lambda_c = (lambda_max /(self.d_influence - self.d_safe)**2) * (min_distance - self.d_influence)**2
-        else:
-            lambda_c = 0.0
-        J_c = lambda_c * J_dj/w_p_sum
-        # print("w_p_sum:", w_p_sum)
-        C3 = J_c # 베이스 조인트 속도에 대한 제약 조건 추가
+        # world에서 사람의 좌표 world_human_position에 넣어야함 (3,) vector
+        # weight_param = np.sum(np.abs(self.human_position - T_e[:3, 3]))
+
+        # if weight_param < 0.5:
+        #     k_e = 1.0
+        # else:
+        #     k_e = 6.0
+
+        # C2 = np.zeros(self.n_dof + 6)
+        # C2[0] = - k_e * θε  # 베이스 x 위치 오차
+
         # 장애물 회피 (간단화)
-        # C3 = np.zeros(self.n_dof + 6)
+        C3 = np.zeros(self.n_dof + 6)
     
         
         # 회전 제어 항
@@ -914,8 +899,11 @@ class QP_mbcontorller(Node):
         ]
 
         prob = cp.Problem(objective, constraints)
+        qp_solve_start = time.time()
         prob.solve(solver=cp.ECOS, verbose=False)
-
+        qp_solve_end = time.time()
+        self.qp_solve_time.append(qp_solve_end - qp_solve_start)
+        self.qp_time.append(qp_solve_end - start_time)
         if x_.value is not None:
             qd = x_.value
         else:
@@ -926,123 +914,23 @@ class QP_mbcontorller(Node):
             qd = qd[: self.n_dof]
             qd = 0 * qd
 
-
-        try:
-            # use elapsed time as x-axis
-            t_now = time.time() - self.start_time
-            # ensure numpy arrays
-            x_vec = np.array(qd).reshape(-1)
-            # quadratic term
-            Qterm = 0.5 * float(x_vec.T @ Q @ x_vec)
-            # individual C parts (ensure C1..C4 exist in scope)
-            c1x = float(C1 @ x_vec) if 'C1' in locals() or 'C1' in globals() else 0.0
-            c2x = float(C2 @ x_vec) if 'C2' in locals() or 'C2' in globals() else 0.0
-            c3x = float(C3 @ x_vec) if 'C3' in locals() or 'C3' in globals() else 0.0
-            c4x = float(C4 @ x_vec) if 'C4' in locals() or 'C4' in globals() else 0.0
-            Csum = c1x + c2x + c3x + c4x
-            total_obj = Qterm + Csum
-
-            self.obj_timestamps.append(t_now)
-            self.obj_Qterm.append(Qterm)
-            self.obj_C1.append(c1x)
-            self.obj_C2.append(c2x)
-            self.obj_C3.append(c3x)
-            self.obj_C4.append(c4x)
-            self.obj_total.append(total_obj)
-        except Exception as e:
-            # don't break control loop if logging fails
-            print(f"Objective logging failed: {e}")
-
-
         wc, vc = qd[0], qd[1]  # 베이스 속도
-        qdc = qd[2:]
+        qdc = qd[2:8]
         # print('qd:', qd)
         # moving base
         twist = Twist()
         twist.linear.x = vc
         twist.angular.z = wc
-        # self.scout_publisher.publish(twist)
+        self.scout_publisher.publish(twist)
 
         # moving arm
-        # self.rtde_c.speedJ(qdc, 0.2, self.dt)
-        # self.rtde_c.waitPeriod(t_start)
+        print('qdc: ', qdc)
+        self.rtde_c.speedJ(qdc, 0.2, self.dt)
+        self.rtde_c.waitPeriod(t_start)
 
         # joint_vel = JointState()
         # joint_vel.velocity = qd[2:]
         # self.ur5e_publisher.publish(joint_vel)
-
-
-    def plot_objective_time_series(self, save_path=None, show_plot=False):
-        """Plot objective value over time and stacked C1..C4 contributions.
-           x axis = elapsed time (s). Stacked area shows contributions of C1..C4,
-           overlay Q-term and total objective as lines.
-        """
-        try:
-            if len(self.obj_timestamps) == 0:
-                print("No objective history to plot.")
-                return
-
-            import matplotlib.pyplot as plt
-            ts = np.array(self.obj_timestamps)
-            c1 = np.array(self.obj_C1)
-            c2 = np.array(self.obj_C2)
-            c3 = np.array(self.obj_C3)
-            c4 = np.array(self.obj_C4)
-            qterm = np.array(self.obj_Qterm)
-            total = np.array(self.obj_total)
-
-            # stacked contributions (positive/negative handled by stacking absolute sign but keep sign)
-            contributions = np.vstack([c1, c2, c3, c4])
-
-            plt.switch_backend('Agg')  # safe when no display
-
-            fig, ax = plt.subplots(figsize=(10, 6))
-
-            # stacked area for C parts
-            labels = ['C1·x', 'C2·x', 'C3·x', 'C4·x']
-            colors = ['#ffd700', '#ffa07a', '#87cefa', '#90ee90']
-            # stackplot expects sequences of shape (n_series, n_points)
-            ax.stackplot(ts, contributions, labels=labels, colors=colors, alpha=0.8)
-
-            # overlay Q-term and total objective
-            ax.plot(ts, qterm, color='k', linestyle='--', linewidth=1.5, label='0.5 x^T Q x')
-            ax.plot(ts, total, color='r', linestyle='-', linewidth=2, label='Total objective')
-
-            # also plot cumulative sums requested: c1, c1+c2, c1+c2+c3, c1+c2+c3+c4
-            cum1 = c1
-            cum2 = c1 + c2
-            cum3 = c1 + c2 + c3
-            cum4 = c1 + c2 + c3 + c4
-            ax.plot(ts, cum1, color='#b8860b', linestyle=':', linewidth=1, label='C1')
-            ax.plot(ts, cum2, color='#ff7f50', linestyle=':', linewidth=1, label='C1+C2')
-            ax.plot(ts, cum3, color='#4682b4', linestyle=':', linewidth=1, label='C1+C2+C3')
-            ax.plot(ts, cum4, color='#2e8b57', linestyle=':', linewidth=1, label='C1+C2+C3+C4')
-
-            ax.set_xlabel('Time (s)')
-            ax.set_ylabel('Objective value (scalar)')
-            ax.set_title('QP objective and decomposition over time')
-            ax.legend(loc='upper right')
-            ax.grid(alpha=0.3)
-
-            plt.tight_layout()
-
-            if save_path is None:
-                # default save location near script
-                save_path = os.path.expanduser(f'./objective_time_series_{int(time.time())}.png')
-            plt.savefig(save_path, dpi=200)
-            plt.close(fig)
-
-            print(f"Objective plot saved: {save_path}")
-            if show_plot:
-                # attempt to open using default viewer (may not be available in headless env)
-                try:
-                    from subprocess import Popen
-                    Popen(['xdg-open', save_path])
-                except Exception:
-                    pass
-
-        except Exception as e:
-            print(f"Failed to plot objective time series: {e}")
 
     def save_ee_trajectory(self):
         """End effector 및 desired 궤적을 파일로 저장"""
@@ -1051,7 +939,7 @@ class QP_mbcontorller(Node):
             return
             
         # 저장 디렉토리 생성
-        save_dir = "/home/nvidia/geon/robotics/jetson_orin/controller/mb_control/hand_trajectories_plots"
+        save_dir = "/home/nvidia/geon/robotics/jetson_orin/controller/mb_control/str_trajectory_plots3"
         os.makedirs(save_dir, exist_ok=True)
         
         # 타임스탬프로 파일명 생성
@@ -1059,8 +947,8 @@ class QP_mbcontorller(Node):
         
         # matplotlib 백엔드를 'Agg'로 설정 (GUI 없이 파일로만 저장)
         plt.switch_backend('Agg')
-
-        plt.figure(figsize=(8, 8))
+        
+        plt.figure(figsize=(8, 6))
         plt.plot(self.ee_trajectory['x'], self.ee_trajectory['y'], '-',color ='c',  linewidth=2, alpha=0.7, label='Actual EE Trajectory')
         plt.plot(self.base_trajectory['x'], self.base_trajectory['y'], '-',color='orange', linewidth=2, alpha=0.7, label='Actual Mobile Base Trajectory')
         
@@ -1074,9 +962,13 @@ class QP_mbcontorller(Node):
         plt.xlabel('X Position (m)')
         plt.ylabel('Y Position (m)')
         plt.title('Actual and Desired XY Trajectory')
-        plt.grid(True, alpha=0.3)
-        plt.legend()
-        plt.axis('equal')
+        ax = plt.gca()
+        ax.set_xlim(0.8, 2.7)
+        ax.set_ylim(-0.8, 0.6)
+        ax.set_aspect('equal', adjustable='box')
+        ax.grid(True, alpha=0.3)
+        ax.legend()
+
         plot_filename_ = f"{save_dir}/trajectories_{self.w1}_{self.w2}_{self.w4}_{timestamp}.png"
         plt.savefig(plot_filename_, dpi=300, bbox_inches='tight')
         plt.close()
@@ -1085,11 +977,12 @@ class QP_mbcontorller(Node):
         
         # 궤적 플롯
         plt.subplot(2, 3, 1)
-        plt.plot(self.ee_trajectory['x'], self.ee_trajectory['y'], 'b-', linewidth=2, alpha=0.7, label='Actual EE Trajectory')
+        plt.plot(self.ee_trajectory['x'], self.ee_trajectory['y'], '-',color ='#87CEFA',  linewidth=2, alpha=0.7, label='Actual EE Trajectory')
+        plt.plot(self.base_trajectory['x'], self.base_trajectory['y'], '-',color='#90EE90', linewidth=2, alpha=0.7, label='Actual Mobile Base Trajectory')
         
         # Desired 궤적 추가
         if len(self.desired_trajectory['x']) > 0:
-            plt.plot(self.desired_trajectory['x'], self.desired_trajectory['y'], 'r--', linewidth=2, alpha=0.8, label='Desired Trajectory')
+            plt.plot(self.desired_trajectory['x'], self.desired_trajectory['y'], 'b--', linewidth=2, alpha=0.8, label='Desired Trajectory')
             # Desired waypoints 마커
             plt.scatter(self.desired_trajectory['x'], self.desired_trajectory['y'], 
                        color='red', s=80, marker='x', alpha=0.8, zorder=5, label='Desired Points')
@@ -1103,9 +996,13 @@ class QP_mbcontorller(Node):
         
         # Actual trajectory 시작/끝점
         plt.scatter(self.ee_trajectory['x'][0], self.ee_trajectory['y'][0], 
-                   color='green', s=100, marker='o', label='Actual Start', zorder=5)
+                   color='cyan', s=100, marker='o', label='Actual EE Start', zorder=5)
         plt.scatter(self.ee_trajectory['x'][-1], self.ee_trajectory['y'][-1], 
-                   color='blue', s=100, marker='s', label='Actual End', zorder=5)
+                   color='blue', s=100, marker='s', label='Actual EE End', zorder=5)
+        plt.scatter(self.base_trajectory['x'][0], self.ee_trajectory['y'][0], 
+                   color='#00FF00', s=100, marker='o', label='Actual Mobile Base Start', zorder=5)
+        plt.scatter(self.base_trajectory['x'][-1], self.ee_trajectory['y'][-1], 
+                   color='green', s=100, marker='s', label='Actual Mobile Base End', zorder=5)
         
         plt.xlabel('X Position (m)')
         plt.ylabel('Y Position (m)')
@@ -1116,9 +1013,9 @@ class QP_mbcontorller(Node):
         
         # X 좌표 시간 변화
         plt.subplot(2, 3, 2)
-        plt.plot(self.ee_trajectory['timestamps'], self.ee_trajectory['x'], 'b-', linewidth=2, label='Actual X')
+        plt.plot(self.ee_trajectory['timestamps'], self.ee_trajectory['x'], 'o-', linewidth=2, label='Actual X')
         if len(self.desired_trajectory['x']) > 0:
-            plt.plot(self.desired_trajectory['timestamps'], self.desired_trajectory['x'], 'r--', linewidth=2, label='Desired X')
+            plt.plot(self.desired_trajectory['timestamps'], self.desired_trajectory['x'], 'b--', linewidth=2, label='Desired X')
         plt.xlabel('Time (s)')
         plt.ylabel('X Position (m)')
         plt.title('X Position over Time')
@@ -1127,9 +1024,9 @@ class QP_mbcontorller(Node):
         
         # Y 좌표 시간 변화
         plt.subplot(2, 3, 3)
-        plt.plot(self.ee_trajectory['timestamps'], self.ee_trajectory['y'], 'b-', linewidth=2, label='Actual Y')
+        plt.plot(self.ee_trajectory['timestamps'], self.ee_trajectory['y'], 'o-', linewidth=2, label='Actual Y')
         if len(self.desired_trajectory['y']) > 0:
-            plt.plot(self.desired_trajectory['timestamps'], self.desired_trajectory['y'], 'r--', linewidth=2, label='Desired Y')
+            plt.plot(self.desired_trajectory['timestamps'], self.desired_trajectory['y'], 'b--', linewidth=2, label='Desired Y')
         plt.xlabel('Time (s)')
         plt.ylabel('Y Position (m)')
         plt.title('Y Position over Time')
@@ -1160,10 +1057,29 @@ class QP_mbcontorller(Node):
             # Desired trajectory를 actual trajectory 시간에 맞춰 보간
             if len(self.desired_trajectory['timestamps']) > 1:
             
-                # 위치 오차 계산
-                position_error = np.sqrt((self.ee_trajectory['x'][-1] - self.desired_trajectory['x'][-1])**2 + 
-                                       (self.ee_trajectory['y'][-1] - self.desired_trajectory['y'][-1])**2)
-                
+                ee_x = np.array(self.ee_trajectory['x'])
+                ee_y = np.array(self.ee_trajectory['y'])
+                ee_t = np.array(self.ee_trajectory['timestamps'])
+
+                des_x = np.array(self.desired_trajectory['x'])
+                des_y = np.array(self.desired_trajectory['y'])
+                des_t = np.array(self.desired_trajectory['timestamps'])
+
+                # 만약 desired 데이터가 1개 이하라면 에러 방지
+                if len(des_t) <= 1:
+                    print("Desired trajectory insufficient")
+                    return
+
+                # desired trajectory 보간
+                des_x_interp = np.interp(ee_t, des_t, des_x)
+                des_y_interp = np.interp(ee_t, des_t, des_y)
+
+                # 오차 계산
+                position_error = np.sqrt(
+                    (ee_x - des_x_interp)**2 +
+                    (ee_y - des_y_interp)**2
+                )
+                                
                 plt.plot(self.ee_trajectory['timestamps'], position_error, 'purple', linewidth=2)
                 plt.xlabel('Time (s)')
                 plt.ylabel('Position Error (m)')
@@ -1251,6 +1167,7 @@ class QP_mbcontorller(Node):
                 
                 avg_tracking_error = np.mean(tracking_errors)
                 max_tracking_error = np.max(tracking_errors)
+                et_ = np.mean(self.et_memory)
             except:
                 pass
         
@@ -1277,6 +1194,7 @@ Y 축 범위: {y_range:.3f} m
 평균 추적 오차: {avg_tracking_error:.3f} m
 최대 추적 오차: {max_tracking_error:.3f} m
 목표 도달 임계값: {self.target_reached_threshold:.3f} m
+궤적 시작 추적 오차: {et_}
 """
         
         with open(stats_filename, 'w') as f:
@@ -1297,11 +1215,9 @@ Y 축 범위: {y_range:.3f} m
     def cleanup_and_plot(self):
         """정리 작업 및 궤적 저장"""
         print("\n🛑 프로그램 종료 중...")
+        print(f'solve average time : {np.mean(self.qp_solve_time)}, qp average time : {np.mean(self.qp_time)}')
         self.save_ee_trajectory()
-        try:
-            self.plot_objective_time_series()
-        except Exception as e:
-            print(f"Failed to save objective plot: {e}")
+
 
 if __name__ == '__main__':
     # 시그널 핸들러 등록
@@ -1314,12 +1230,6 @@ if __name__ == '__main__':
     except KeyboardInterrupt:
         print("\n🛑 Ctrl+C 감지됨")
     finally:
-        # cleanup은 rclpy.ok()가 참일 때만 실행합니다.
-        if rclpy.ok():
-            print("✨ ROS 2 종료 정리 시작...")
-            node.cleanup_and_plot() # 단 한번 저장
-            node.destroy_node()
-            rclpy.shutdown()
-        else:
-            # rclpy.shutdown()이 이미 호출되었을 경우 (안전 장치)
-            print("✨ ROS 2 이미 종료됨. 추가 정리 생략.")
+        node.cleanup_and_plot()
+        node.destroy_node()
+        rclpy.shutdown()

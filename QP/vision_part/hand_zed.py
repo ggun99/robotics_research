@@ -26,7 +26,7 @@ class Vision_Hand(Node):
         # [ULTRA depth mode : Computation mode that favors edges and sharpness. Requires more GPU memory and computation power.] 
         # [PERFORMANCE for faster processing : Computation mode optimized for speed.]
         init_params.coordinate_units = sl.UNIT.MILLIMETER  # Use meter units (for depth measurements)    
-        # init_params.camera_resolution = sl.RESOLUTION.VGA  # Set resolution to 640x480  HD2K: 약 1m,  HD1080: 약 0.7m, HD720: 약 0.5m (500mm), VGA: 약 0.3m (300mm)
+        init_params.camera_resolution = sl.RESOLUTION.HD1080  #    VGA  # Set resolution to 640x480  HD2K: 약 1m,  HD1080: 약 0.7m, HD720: 약 0.5m (500mm), VGA: 약 0.3m (300mm)
         # init_params.camera_fps = 100 # Optional: Set FPS (e.g., 30 FPS)
         # Open the camera   
         status = self.zed.open(init_params)

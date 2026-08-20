@@ -1,10 +1,17 @@
 import os
 os.environ["OMNI_KIT_ACCEPT_EULA"] = "YES"
 
+# matplotlib: non-GUI backend so plots save to files in headless mode
+import matplotlib
+matplotlib.use("Agg")
+
 from isaacsim import SimulationApp
 
-simulation_app = SimulationApp({"headless": False})
+OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "collision_weight_results")
+os.makedirs(OUTPUT_DIR, exist_ok=True)
 
+# run Isaac Sim in headless mode (no GUI)
+simulation_app = SimulationApp({"headless": True})
 
 from isaacsim.core.utils.nucleus import get_assets_root_path
 from isaacsim.core.api import World, SimulationContext
@@ -291,29 +298,31 @@ min_distance_between_obstacles = 1.5
 obstacle_radius_range = (0.25, 0.25)
 
 
-start = [0.68, 0.0, 1]
-end = [2.5,0,1]
-planner = LinearTrajectoryPlanner(start=start, end=end)
+# start = [0.68, 0.0, 1]
+# end = [2.5,0,1]
+# planner = LinearTrajectoryPlanner(start=start, end=end)
 
 # 시뮬레이션 컨텍스트 초기화
 simulation_context = SimulationContext()
-# obstacles_positions = planner.generate_obstacles(goal=human_goal_position)
-# obstacles_positions = np.array([
-#      [1.25,0.125, 1.],
-#      [2.8, 0.5, 0.97],
-#      [2.5 , 2.5, 0.97]])
-obstacles_positions = np.array([
-     [1.25,4.0, 1.]])
+#================================================== 변경 변수들 ==============================
+obstacles_positions = np.array([[1.25,1.5, 1.]])
+w1 = 1.0 
+w2 = 1.0
+w3 = 0.0
+w4 = 0.2
+desired_position = [3.5,1.0,1]
+#===========================================================================================
+
 
 # 사람의 경로를 부드럽게 만들기
 num_traj_points = 300
-human_smoothed_path = planner.generate_linear_path(num_points=num_traj_points)
+# human_smoothed_path = planner.generate_linear_path(num_points=num_traj_points)
 
-# 사람의 속도 프로파일 생성
-human_velocity_profile = planner.generate_velocity_profile(human_smoothed_path, v_max=0.05)
+# # 사람의 속도 프로파일 생성
+# human_velocity_profile = planner.generate_velocity_profile(human_smoothed_path, v_max=0.05)
 
-# 사람의 전체 경로 생성
-trajectories = planner.generate_full_trajectory_with_offset(human_smoothed_path, human_velocity_profile, dt=0.2, time_offset=15)
+# # 사람의 전체 경로 생성
+# trajectories = planner.generate_full_trajectory_with_offset(human_smoothed_path, human_velocity_profile, dt=0.2, time_offset=15)
 
 # human_trajectory = trajectories
 # 시뮬레이션 루프에서 사람의 움직임 따라가기
@@ -333,10 +342,12 @@ plt.grid(True)
 circle = plt.Circle((obstacles_positions[0][0], obstacles_positions[0][1]), obstacle_radius, color='red', alpha=0.5)
 plt.gca().add_patch(circle)
 
-
+# 목표 위치
+plt.scatter(desired_position[0], desired_position[1], color='green', label="Desired Position", s=100)  # 목표 위치
 # 로봇의 시작 위치
 plt.scatter(0.6088934, 0.1442274, color='cyan', label="Robot Start Position", s=100)  # 로봇의 시작 위치
-
+# 장애물 위치
+plt.scatter(obstacles_positions[0][0], obstacles_positions[0][1], color='red', label="Obstacle Position", s=100)  # 장애물 위치
 # plt.scatter(human_trajectory["x"][-1], human_trajectory["y"][-1], color='orange', label="Robot Goal Position", s=100)  # 로봇의 목표 위치
 # # Human trajectory 그리기
 # plt.plot(human_trajectory["x"], human_trajectory["y"], color='blue', linestyle='--', label="Target trajectory")
@@ -493,9 +504,9 @@ num_points_per_edge = 5  # 각 변에 5개의 점 생성
 rectangle_edge_points_local = generate_rectangle_edge_points(center=(0, 0, 0), width=width, height=height,
                                                              num_points_per_edge=num_points_per_edge)
 
-desired_position = [3.5,1.0,1]
+
 while simulation_app.is_running():
-    world.step(render=True)
+    world.step(render=False)
     if world.is_playing():
         
         if world.current_time_step_index == 0:  
@@ -713,8 +724,12 @@ while simulation_app.is_running():
             J_mb_w = J_mb[3:, :]  # 3x8 자코비안 (각속도)
 
             T_error = np.linalg.inv(H_current.A) @ H_desired.A  # 4x4
-
-            et = np.sum(np.abs(T_error[:3, -1]))
+            er_sum = 0
+            for i in range(3):
+                er = H_current.A[i,3]-H_desired.A[i,3]
+                er_sum += er**2
+            et= np.sqrt(er_sum)
+            # et = np.sum(np.abs(T_error[:3, -1]))
             # Quadratic component of objective function
             Q = np.eye(n_dof + 6)
 
@@ -826,7 +841,7 @@ while simulation_app.is_running():
             perpendicular_vec = d_vec_unit + g_vec
             perpendicular_vec /= np.linalg.norm(perpendicular_vec)  # 정규화
             # 회피 벡터 계산
-            print("g_vec:", g_vec)
+            # print("g_vec:", g_vec)
             avoid_vec = (g_vec) #+ d_vec_unit #+ perpendicular_weight * perpendicular_vec# 장애물 방향과 목표 방향의 합
             # avoid_vec = (g_vec) + perpendicular_vec + d_vec_unit # 장애물 방향과 목표 방향의 합
 
@@ -939,7 +954,7 @@ while simulation_app.is_running():
 
                     d_dot = (avoid_vec) @ J_mb_v   # 장애물 피하는 방향으로의 자코비안
                     
-                    A[i, :8] = -d_dot 
+                    A[i, :8] = d_dot 
                     A[i, 8:] = np.zeros((1, 6)) 
                     B[i] = (min_dist_list[i] - d_safe) / ((d_influence - d_safe))
                     # B[i] = (d_influence-min_dist_list[i])/(d_influence-d_safe) 
@@ -947,7 +962,7 @@ while simulation_app.is_running():
                     # print("min_dist_list[i]:", min_dist_list[i])
                     # print(f"w_p: {w_p}")
                     # w_p = (min_dist_list[i]-d_influence)/(d_influence-d_safe) 
-                    J_dj[:8] +=  (-d_dot) * (w_p)  # 베이스 조인트 속도에 대한 제약 조건
+                    J_dj[:8] +=  (d_dot) * (w_p)  # 베이스 조인트 속도에 대한 제약 조건
                     # print("J_dj[:8]:", J_dj[:8])
                     # print(f"robot {i}th link Distance: {min_dist:.2f} m")
                     # print(f"{i}th J_dj : {A[i, :8] * w_p}")
@@ -963,7 +978,7 @@ while simulation_app.is_running():
 
                     d_dot = (avoid_vec) @ J_mb_arm_v
 
-                    A[i, :8] = -d_dot
+                    A[i, :8] = d_dot
                     A[i, 8:] = np.zeros((1, 6)) 
                     B[i] = (min_dist_list[i] - d_safe) / ((d_influence - d_safe))
                     # B[i] = (d_influence-min_dist_list[i])/(d_influence-d_safe) 
@@ -971,7 +986,7 @@ while simulation_app.is_running():
                     # print("min_dist_list[i]:", min_dist_list[i])
                     # print(f"w_p: {w_p}")
                     # w_p = (min_dist_list[i]-d_influence)/(d_influence-d_safe) 
-                    J_dj[:8] += (-d_dot) * (w_p)  # 베이스 조인트 속도에 대한 제약 조건
+                    J_dj[:8] += (d_dot) * (w_p)  # 베이스 조인트 속도에 대한 제약 조건
                     # print("J_dj[:8]:", J_dj[:8])
                     # print(f"robot {i}th link Distance: {min_dist:.2f} m")
                     # print(f"{i}th J_dj : {A[i, :8] * w_p}")
@@ -981,14 +996,15 @@ while simulation_app.is_running():
             # 그래프 표시
             if first_plot:
                 # 그래프 저장
-                plt.savefig("first_simulation_environment_with_trajectories_straight.png")
-                print("Graph saved as 'first_simulation_environment_with_trajectories.png'")
+                out_path = os.path.join(OUTPUT_DIR, f"first_simulation_{obstacles_positions[0][0]:.2f}_{obstacles_positions[0][1]:.2f}_environment_with_trajectories_straight.png")
+                plt.savefig(out_path)
+                print(f"Graph saved: {out_path}")
                 first_plot = False
             
             bTe = ur5e_robot.fkine(q[2:], include_base=False).A  
             θε = atan2(bTe[1, -1], bTe[0, -1])
            
-            C1 = np.concatenate((np.zeros(2), J_m.reshape((n_dof - 2,)), np.zeros(6)))
+            C1 = np.concatenate((np.zeros(2), -J_m.reshape((n_dof - 2,)), np.zeros(6)))
             C2 = np.zeros(n_dof + 6)
             C2[0] = - 5. * θε  # 베이스 x 위치 오차
 
@@ -1001,15 +1017,20 @@ while simulation_app.is_running():
             J_c = lambda_c * J_dj/w_p_sum
             # print("w_p_sum:", w_p_sum)
             C3 = J_c # 베이스 조인트 속도에 대한 제약 조건 추가
-            # C4 = np.concatenate((np.zeros(5), np.ones((n_dof - 5)), np.zeros(6)))
-            # # C4[4:] *= 1./np.abs(np.degrees(theta)) 
-            # epsilon = 1e-6  # 최소 허용 값
-            # C4[4:] -= 1.5 / np.maximum(np.abs(np.degrees(theta)), epsilon)
-            w1 = 0.2
-            w2 = 0.05
-            w3 = 0.2
-            w4 = 0.2
-            C = w1 * C1 + w2 * C2 + w3 * C3 #+ w4 * C4
+            # 회전 제어 항
+            J_h = np.zeros(n_dof + 6)
+            J_mb_w_h = direction_unit_vector @ J_mb_w
+            epsilon = 1e-6
+            lambda_h = 0.3 * max(abs(theta), epsilon)
+            J_h[:8] = lambda_h * J_mb_w_h
+
+            C4 = J_h
+
+            w1 = w1 
+            w2 = w2
+            w3 = w3
+            w4 = w4
+            C = w1 * C1 + w2 * C2 + w3 * C3 + w4 * C4
             J_ = np.c_[J_mb, np.eye(6)]  # J_ 행렬 (예시)
 
             eTep = np.linalg.inv(T) @ H_desired.A  # 현재 위치에서의 오차 행렬
@@ -1081,7 +1102,7 @@ while simulation_app.is_running():
             et_z = np.abs(eTep[2, -1])
 
             # 전체 에러 계산
-            et = et_x + et_y + et_z
+            # et = et_x + et_y + et_z
 
             # 에러 값 저장
             et_values.append(et)
@@ -1115,8 +1136,10 @@ while simulation_app.is_running():
                 plt.legend()
                 
                 # 그래프 저장
-                plt.savefig("simulation_environment_with_obstacle_1.5,4.0,lambda_5.0_.png")
-                print("Graph saved as 'simulation_environment_with_trajectories.png'")
+                fname = f"simulation_environment_with_obstacle_{obstacles_positions[0][0]:.2f}_{obstacles_positions[0][1]:.2f}_w3_{w3:.1f}.png"
+                out_path = os.path.join(OUTPUT_DIR, fname)
+                plt.savefig(out_path)
+                print(f"Graph saved: {out_path}")
                 plt.close()
                 # 첫 번째 그래프 저장 (Error Reduction Graph)
                 plt.figure(figsize=(10, 6))
@@ -1130,8 +1153,9 @@ while simulation_app.is_running():
                 plt.title("Error Reduction Over Time")
                 plt.legend()
                 plt.grid()
-                plt.savefig("error_reduction_graph_.png")
-                print("Graph saved as 'error_reduction_graph__straight.png'")
+                out_path = os.path.join(OUTPUT_DIR, f"error_{obstacles_positions[0][0]:.2f}_{obstacles_positions[0][1]:.2f}_w3_{w3:.1f}_reduction_graph.png")
+                plt.savefig(out_path)
+                print(f"Graph saved: {out_path}")
                 plt.close()  # 그래프를 닫아 다음 그래프와 겹치지 않도록 함
                 
                 # theta_values의 평균, 최대값, 최소값 계산
@@ -1153,8 +1177,9 @@ while simulation_app.is_running():
                 plt.title("Theta Over Time")
                 plt.legend()
                 plt.grid()
-                plt.savefig("theta_over_time_graph.png")
-                print("Graph saved as 'theta_over_time_graph.png'")
+                out_path = os.path.join(OUTPUT_DIR, f"theta_{obstacles_positions[0][0]:.2f}_{obstacles_positions[0][1]:.2f}_w3_{w3:.1f}_over_time_graph.png")
+                plt.savefig(out_path)
+                print(f"Graph saved: {out_path}")
                 plt.close()  # 그래프를 닫아 다음 그래프와 겹치지 않도록 함
                 
                 # 시뮬레이션 종료

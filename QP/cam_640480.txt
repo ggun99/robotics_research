@@ -1,1 +1,7 @@
 ros2 launch realsense2_camera rs_launch.py depth_module.profile:=640x480x30 enable_sync:=true align_depth:=true
+
+
+폴더 통째로 가져올 때, 
+scp -r user@192.168.0.20:/home/user/my_folder /home/user/
+파일 하나 가져올 때,
+scp user@192.168.0.20:/home/user/file.txt /home/user/

@@ -4,11 +4,11 @@ import sys
 import os
 
 # 파라미터 조합 정의
-w_values = [0.0,0.2,0.5,1.0]  # w1, w2, w4에 사용할 값들
-lambda_h_a_values = [0.1,0.3,0.5]  # lambda_h_a에 사용할 값들
+w_values = [0.0,0.2,0.5,1.0] #[0.0,0.2,0.5,1.0]  # w1, w2, w4에 사용할 값들
+lambda_h_a_values = [0.5] #[0.1,0.3,0.5]  # lambda_h_a에 사용할 값들
 
 # 결과 저장 폴더 지정
-RESULTS_FOLDER = "circle_simulation_results_minus3"  # 원하는 폴더명으로 변경 가능
+RESULTS_FOLDER = "circle_simulation_results_minus4"  # 원하는 폴더명으로 변경 가능
 
 def create_results_folder():
     """결과 저장용 폴더 생성"""
@@ -60,6 +60,7 @@ try:
     draw = _debug_draw.acquire_debug_draw_interface()
     from roboticstoolbox import DHRobot, RevoluteDH
 
+    import time
     import numpy as np
     from scipy.spatial.transform import Rotation as R
     from math import atan2 as atan2
@@ -104,6 +105,9 @@ try:
     scatter_y = []
     scatter_mob_x = []
     scatter_mob_y = []
+    qp_time = []
+    qp_solve_times = []
+    qp_num = 0
 
     # 시뮬레이션 설정
     ur5e_robot = rtb.models.UR5()
@@ -217,6 +221,7 @@ try:
                     my_robot.switch_control_mode("velocity")
                     print("Reached default position!")
             else:
+                qp_start_time = time.time()
                 # 로봇 기구학 계산
                 sb_rot = r.as_matrix()
                 T_sb = np.eye(4)
@@ -408,7 +413,10 @@ try:
                     ]
 
                     prob = cp.Problem(objective, constraints)
+                    prob_solve_start = time.time()
                     prob.solve(solver=cp.ECOS, verbose=False)
+                    prob_solve_end = time.time()
+                    qp_solve_times.append(prob_solve_end - prob_solve_start)
 
                     if x_.value is not None:
                         qd = x_.value
@@ -417,7 +425,9 @@ try:
                 except Exception as e:
                     print("QP solver error: " + str(e))
                     qd = np.zeros(n_dof+6)
-
+                qp_end_time = time.time()
+                real_current_time = qp_end_time - qp_start_time
+                qp_time.append(real_current_time)
                 qd = qd[:n_dof]
                 qd = qd[:8]
 
@@ -478,7 +488,7 @@ try:
         ax.set_ylim(-4.0, 4.0)
         
         # 제목과 라벨 설정
-        ax.set_title("Trajectory (w_m=" + str(w1) + ", w_o=" + str(w2) + ", w_h=" + str(w4) + ", λ=" + str(lambda_h_a_param) + ")")
+        # ax.set_title("Trajectory (w_m=" + str(w1) + ", w_o=" + str(w2) + ", w_h=" + str(w4) + ", λ=" + str(lambda_h_a_param) + ")")
         ax.set_xlabel("X Position (m)")
         ax.set_ylabel("Y Position (m)")
         
@@ -506,8 +516,10 @@ try:
     # 최종 오차를 파일로 저장
     error_file = os.path.join(RESULTS_FOLDER, "error_w1_" + str(w1) + "_w2_" + str(w2) + "_w4_" + str(w4) + "_lambda_" + str(lambda_h_a_param) + ".txt")
     final_error = np.mean(et_values) if et_values else 1.0  # inf 대신 1.0으로 설정
+    avg_prob_solve = float(np.mean(qp_solve_times)) if len(qp_solve_times) > 0 else 0.0
+    avg_time_values = float(np.mean(qp_time)) if len(qp_time) > 0 else 0.0
     with open(error_file, 'w') as f:
-        f.write(str(final_error))
+        f.write(str(final_error) + "," + str(avg_prob_solve) + "," + str(avg_time_values) )
     
     print("Final error: " + str(final_error))
     
@@ -519,7 +531,7 @@ except Exception as e:
     # 오류 발생시에도 파일 생성
     error_file = os.path.join(RESULTS_FOLDER, "error_w1_" + str(w1) + "_w2_" + str(w2) + "_w4_" + str(w4) + "_lambda_" + str(lambda_h_a_param) + ".txt")
     with open(error_file, 'w') as f:
-        f.write("1.0")  # inf 대신 1.0으로 설정
+        f.write("1.0,0.0,0.0\\n")
 
 finally:
     simulation_app.close()

@@ -23,6 +23,8 @@ import numpy as np
 from scipy.spatial.transform import Rotation as R
 from math import atan2 as atan2
 import qpsolvers as qp
+import cvxpy as cp
+
 from spatialmath import base, SE3
 import roboticstoolbox as rtb
 import matplotlib.pyplot as plt
@@ -608,9 +610,26 @@ while simulation_app.is_running():
 
             lb = -np.r_[qdlim[: n_dof], 10 * np.ones(6)]
             ub = np.r_[qdlim[: n_dof], 10 * np.ones(6)]
+            try:
 
-            qd = qp.solve_qp(Q,C,A,B,J_,v,lb=lb, ub=ub, solver='quadprog')
-            qd = qd[: n_dof]
+                x_ = cp.Variable(n_dof+6)
+                objective = cp.Minimize(0.5 * cp.quad_form(x_, Q) + C.T @ x_)
+                constraints = [
+                    x_ >= lb,
+                    x_ <= ub,
+                    J_ @ x_ == v,
+                ]
+
+                prob = cp.Problem(objective, constraints)
+                prob.solve(solver=cp.OSQP, warm_start=True, verbose=False)
+            except Exception as e:
+                print("QP solver error: " + str(e))
+                qd = np.zeros(n_dof+6)
+
+            qd = qd[:n_dof]
+            
+            # qd = qp.solve_qp(Q,C,A,B,J_,v,lb=lb, ub=ub, solver='quadprog')
+            # qd = qd[: n_dof]
             # print("qd:", qd)
             if qd is None:
                 print("QP solution is None")

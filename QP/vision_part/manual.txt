@@ -1,0 +1,2 @@
+multicam_circle_precision3.py + multicam_circle_auto2.py ==> ur이 평평하게 누워있을 때, 원을 5바퀴를 돌면서 5도마다 카메라에서 인식된 x,y 좌표 기록 및 std, mean 값 기록 후 그래프로 나타냄 
+multicam_circle_precision2.py + multicam_circle_auto.py ==> ur이 평평하게 누워있을 때, 원을 1바퀴를 돌면서 각 5도마다 5번의 사진을 찍어 카메라에서 인식된 x,y 좌표 기록 및 std, mean 값 기록 후 그래프로 나타냄 

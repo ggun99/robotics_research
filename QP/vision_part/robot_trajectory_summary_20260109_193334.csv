@@ -1,0 +1,22 @@
+metric,total_positions,data_collection_datetime,rotation_step_degrees,samples_per_position,value,unit
+experiment_info,72.000000,2026-01-09 19:33:34,5.000000,5.000000,,
+x_position_mean,,,,,1.641957337909267,m
+x_position_std,,,,,0.4827765302005544,m
+x_position_range,,,,,1.3596965056028236,m
+y_position_mean,,,,,-0.23199277604807575,m
+y_position_std,,,,,0.48463268009640653,m
+y_position_range,,,,,1.3722747554843633,m
+average_position_uncertainty,,,,,0.0,m
+max_position_uncertainty,,,,,0.0,m
+cam1_participation_count,,,,,15,positions
+cam1_participation_rate,,,,,0.20833333333333334,ratio
+cam1_avg_markers,,,,,9.533333333333333,markers
+cam1_total_samples,,,,,15,samples
+cam2_participation_count,,,,,20,positions
+cam2_participation_rate,,,,,0.2777777777777778,ratio
+cam2_avg_markers,,,,,16.25,markers
+cam2_total_samples,,,,,20,samples
+cam3_participation_count,,,,,72,positions
+cam3_participation_rate,,,,,1.0,ratio
+cam3_avg_markers,,,,,25.75,markers
+cam3_total_samples,,,,,72,samples
