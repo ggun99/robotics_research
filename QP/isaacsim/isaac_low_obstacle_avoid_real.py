@@ -7,9 +7,9 @@ import numpy as np
 
 # 파라미터 설정
 w1 = 1.0 #{w1_val}
-w2 = 0.4  #{w2_val}
+w2 = 0.5  #{w2_val}
 w3 = 1.0 #{w3_val}
-w4 = 0.2 #{w4_val}
+w4 = 0.5 #{w4_val}
 obstacles_positions = np.array([[1.25,1.0, 0.2]])
 obstacle_radius = 0.15
 obstacle_height = 1.2
@@ -34,7 +34,7 @@ try:
     from isaacsim.core.api import World, SimulationContext
     from isaacsim.core.api.objects import DynamicCylinder, VisualSphere, VisualCylinder, FixedCylinder
     from isaacsim.robot.manipulators.grippers import ParallelGripper
-    from isaacsim.core.utils.stage import add_reference_to_stage
+    from isaacsim.core.utils.stage import add_reference_to_stage, get_current_stage
     from isaacsim.core.prims import Articulation, XFormPrim
     from isaacsim.core.utils.types import ArticulationActions
     from isaacsim.core.utils.prims import create_prim
@@ -295,8 +295,14 @@ try:
     
     # 로봇 로드
     robot_asset_path = "/home/airlab/ros_workspace/src/aljnu_mobile_manipulator/aljnu_description/urdf/aljnu_mp/aljnu_mp.usd"
+    # robot_asset_path = "/home/airlab/ros_workspace/src/aljnu_mobile_manipulator/aljnu_description/urdf/aljnu_mp_oppos/aljnu_mp_oppos.usd"
     prim_path = "/World/aljnu_mp"
     add_reference_to_stage(usd_path=robot_asset_path, prim_path=prim_path)
+
+    # stage = get_current_stage()
+    # robot_prim = stage.GetPrimAtPath(prim_path)
+    # robot_xform = UsdGeom.Xformable(robot_prim)
+    # robot_xform.AddRotateXYZOp().Set(Gf.Vec3f(0.0, 0.0, 180.0))
 
     # 파라미터 설정
     aljnu_joint_indices = np.array([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15])
@@ -306,7 +312,7 @@ try:
     qdlim[:1] = 1.5
     qdlim[1] = 0.6
 
-    world.scene.add_default_ground_plane(z_position=-0.2)
+    world.scene.add_default_ground_plane(z_position=-0.24)
     world.reset()
 
     # 궤적 생성 (원형 → 직선으로 변경)
@@ -346,9 +352,13 @@ try:
 
     joints_default_positions = my_robot.get_joint_positions()
     target_positions = np.copy(joints_default_positions)
+
+    # target_positions[0][4] = np.pi
     target_positions[0][5] = -np.pi/2
     target_positions[0][6] = np.pi/2 
-    target_positions[0][8] = np.pi/2
+    target_positions[0][8] = np.pi/2  # front : np.pi/2, back : -np.pi/2
+    
+    print("Target joint positions: ", target_positions[0][aljnu_joint_indices])
     target_joint_positions = target_positions[0][aljnu_joint_indices]
 
     # 시뮬레이션 변수들
@@ -369,7 +379,7 @@ try:
     width = 1.  # 700 mm
     height = 0.7  # 930 mm
     num_points_per_edge = 5  # 각 변에 5개의 점 생성
-    
+    opposite_side = True  # EE가 반대 방향을 바라보도록 설정
     
     while True: #simulation_app.is_running() and iteration_count < max_iterations:
         iteration_count += 1
@@ -389,8 +399,6 @@ try:
             quat = mobile_base_quat[0]
             r = R.from_quat([quat[1], quat[2], quat[3], quat[0]])
 
-            # EE see the opposite side
-            # current_joint_positions[4] = -current_joint_positions[4]
 
             q = np.zeros(8)
             q[0] = 0.0
@@ -403,7 +411,8 @@ try:
                     joint_indices=aljnu_joint_indices
                 )
                 my_robot.apply_action(actions)
-
+                # print("Moving to default position...")
+                # print("Current joint positions: ", current_joint_positions[4:10], "Difference: ", abs(current_joint_positions[4:10] - target_joint_positions[4:10]))
                 if np.all(abs(current_joint_positions[4:10] - target_joint_positions[4:10]) < position_tolerance):
                     reached_default = True
                     my_robot.switch_control_mode("velocity")
@@ -948,7 +957,7 @@ try:
         plt.title("Simulation Environment with Obstacle Avoidance")
         
         # 그래프 저장
-        fname = f"simulation_obstaclewall_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+        fname = f"no_oppos_w2_{w2:.1f}_w4_{w4:.1f}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
         out_path = os.path.join(RESULTS_FOLDER, fname)
         plt.savefig(out_path)
         print(f"Graph saved: {out_path}")
@@ -967,22 +976,23 @@ try:
         else:
             print("Theta values are empty. No data to calculate.")
         # 두 번째 그래프 저장 (Theta Over Time)
-        plt.figure(figsize=(10, 6))
-        plt.plot(time_values, theta_values, label="Theta (degrees)", color="purple")
-        plt.xlabel("Simulation Time (s)")
-        plt.ylabel("Theta (degrees)")
-        plt.title("Theta Over Time")
-        plt.legend()
-        plt.grid()
-        out_path = os.path.join(RESULTS_FOLDER, f"theta_{obstacles_positions[0][0]:.2f}_{obstacles_positions[0][1]:.2f}_w3_{w3:.1f}_over_time_graph.png")
-        plt.savefig(out_path)
-        print(f"Graph saved: {out_path}")
-        plt.close()  # 그래프를 닫아 다음 그래프와 겹치지 않도록 함
+        # plt.figure(figsize=(10, 6))
+        # plt.plot(time_values, theta_values, label="Theta (degrees)", color="purple")
+        # plt.xlabel("Simulation Time (s)")
+        # plt.ylabel("Theta (degrees)")
+        # plt.title("Theta Over Time")
+        # plt.legend()
+        # plt.grid()
+        # out_path = os.path.join(RESULTS_FOLDER, f"oppos_w2_{w2:.1f}_w4_{w4:.1f}_over_time_graph.png")
+        # plt.savefig(out_path)
+        # print(f"Graph saved: {out_path}")
+        # plt.close()  # 그래프를 닫아 다음 그래프와 겹치지 않도록 함
+
         simulation_app.close()
         print("Simulation completed.")
 
     if len(scatter_x) > 0:
-        filename = os.path.join(RESULTS_FOLDER, "str_simulation_w1_" + str(w1) + "_w2_" + str(w2) + "_w4_" + str(w4) + "_lambda_" + str(lambda_h_a_param) + ".png")
+        filename = os.path.join(RESULTS_FOLDER, "no_oppos_str_simulation_w1_" + str(w1) + "_w2_" + str(w2) + "_w4_" + str(w4) + "_lambda_" + str(lambda_h_a_param) + ".png")
         
         # Figure 설정을 더 명확하게 지정
         fig, ax = plt.subplots(figsize=(8, 8), dpi=100)
@@ -1019,21 +1029,21 @@ try:
         print("Graph saved as '" + filename + "'")
     
     # 최종 오차를 파일로 저장
-    error_file = os.path.join(RESULTS_FOLDER, "error_w1_" + str(w1) + "_w2_" + str(w2) + "_w4_" + str(w4) + "_lambda_" + str(lambda_h_a_param) + ".txt")
-    final_error = et_values[-1] if et_values else 1.0  # inf 대신 1.0으로 설정
+    # error_file = os.path.join(RESULTS_FOLDER, "oppos_error_w1_" + str(w1) + "_w2_" + str(w2) + "_w4_" + str(w4) + "_lambda_" + str(lambda_h_a_param) + ".txt")
+    # final_error = et_values[-1] if et_values else 1.0  # inf 대신 1.0으로 설정
     
-    # theta_values 평균 계산
-    avg_theta = np.mean(theta_values) if theta_values else 0.0
+    # # theta_values 평균 계산
+    # avg_theta = np.mean(theta_values) if theta_values else 0.0
     
-    # 오차와 평균 theta 값을 함께 저장
-    with open(error_file, 'w') as f:
-        f.write(str(final_error) + "\n")
-        f.write(str(avg_theta))
+    # # 오차와 평균 theta 값을 함께 저장
+    # with open(error_file, 'w') as f:
+    #     f.write(str(final_error) + "\n")
+    #     f.write(str(avg_theta))
     
-    # theta 평균을 별도 파일로도 저장
-    theta_file = os.path.join(RESULTS_FOLDER, "theta_avg_w1_" + str(w1) + "_w2_" + str(w2) + "_w4_" + str(w4) + "_lambda_" + str(lambda_h_a_param) + ".txt")
-    with open(theta_file, 'w') as f:
-        f.write(str(avg_theta))
+    # # theta 평균을 별도 파일로도 저장
+    # theta_file = os.path.join(RESULTS_FOLDER, "oppos_theta_avg_w1_" + str(w1) + "_w2_" + str(w2) + "_w4_" + str(w4) + "_lambda_" + str(lambda_h_a_param) + ".txt")
+    # with open(theta_file, 'w') as f:
+    #     f.write(str(avg_theta))
     
     print("Final error: " + str(final_error))
     print("Average theta: " + str(avg_theta) + " degrees")

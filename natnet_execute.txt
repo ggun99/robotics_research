@@ -1,0 +1,25 @@
+ros2 launch natnet_ros2 natnet_ros2.launch.py serverIP:=192.168.0.13 clientIP:=192.168.0.5 serverType:=unicast pub_rigid_body:=true
+
+
+ros2 param list /natnet_ros
+  clientIP
+  global_frame
+  individual_marker_msg_type
+  log_frames
+  log_internals
+  log_latencies
+  multicastAddress
+  pub_individual_marker
+  pub_pointcloud
+  pub_rigid_body
+  pub_rigid_body_marker
+  qos_overrides./tf.publisher.depth
+  qos_overrides./tf.publisher.durability
+  qos_overrides./tf.publisher.history
+  qos_overrides./tf.publisher.reliability
+  remove_latency
+  serverCommandPort
+  serverDataPort
+  serverIP
+  serverType
+  use_sim_time
