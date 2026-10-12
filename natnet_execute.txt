@@ -1,4 +1,6 @@
-ros2 launch natnet_ros2 natnet_ros2.launch.py serverIP:=192.168.0.13 clientIP:=192.168.0.5 serverType:=unicast pub_rigid_body:=true
+ros2 launch natnet_ros2 natnet_ros2.launch.py serverIP:=192.168.1.2 clientIP:=192.168.1.4 serverType:=unicast pub_rigid_body:=true
+
+ros2 launch natnet_ros2 natnet_ros2.launch.py serverIP:=192.168.1.2 clientIP:=192.168.1.4 serverType:=unicast pub_rigid_body:=true pub_rigid_body_marker:=true pub_pointcloud:=true
 
 
 ros2 param list /natnet_ros
@@ -23,3 +25,14 @@ ros2 param list /natnet_ros
   serverIP
   serverType
   use_sim_time
+  
+  
+  # 화면 vnc 켜기 -- jetson 화면
+  
+  sudo x11vnc \
+> -display :2 \
+> -auth /run/user/1000/gdm/Xauthority \
+> -forever \
+> -shared \
+> -rfbport 5900 \
+> -rfbauth /home/nvidia/.vnc/passwd
