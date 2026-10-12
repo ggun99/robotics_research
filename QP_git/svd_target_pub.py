@@ -66,7 +66,7 @@ class IncomingPointsPlotter(Node):
 		# 두 주성분 벡터 (2D 평면의 기저)
 		pc1 = Vt[0, :]
 		pc2 = Vt[1, :]
-		# 세 번째 주성분 벡터 (평면의 법선 벡터 -> z_axis로 사용)
+		# 세 번째 주성분 벡터 (평면의 법선 벡터 -> y_axis로 사용)
 		pc3 = Vt[2, :]
 
 		x_proj = centered_points @ pc1
@@ -135,15 +135,24 @@ class IncomingPointsPlotter(Node):
 			self.get_logger().info(f"Predicted 3D Position: {predicted_position_3d}")
 
 			# 5-2. TF에 전달할 회전 축(Orientation) 설계
-			# X축: 끝 점(p_end)에서 예측 점(next_point_2d)으로 향하는 3D 방향 벡터 (전진 접선)
-			p_end_centered_3d = p_end[0] * pc1 + p_end[1] * pc2
-			x_axis_3d = predicted_centered_3d - p_end_centered_3d
+
+			z_vec = self.human_position - predicted_position_3d
+			z_vec_norm = z_vec / np.linalg.norm(z_vec) #if np.linalg.norm(z_vec) > 0 else np.array([0.0, 0.0, 1.0])
+
+			z_axis_3d = z_vec_norm
+			y_axis_3d = pc3
+			x_axis_3d = np.cross(z_axis_3d, y_axis_3d)
+			x_axis_3d = x_axis_3d / np.linalg.norm(x_axis_3d) #if np.linalg.norm(x_axis_3d) > 0 else np.array([1.0, 0.0, 0.0])
+
+			# # X축: 끝 점(p_end)에서 예측 점(next_point_2d)으로 향하는 3D 방향 벡터 (전진 접선)
+			# p_end_centered_3d = p_end[0] * pc1 + p_end[1] * pc2
+			# x_axis_3d = predicted_centered_3d - p_end_centered_3d
 			
-			# Z축: SVD 평면의 법선 벡터 (케이블 평면의 수직축)
-			z_axis_3d = pc3
+			# # Y축: SVD 평면의 법선 벡터 (케이블 평면의 수직축)
+			# y_axis_3d = pc3
 			
-			# Y축: 오른손 법칙에 부합하도록 두 축을 외적(Cross Product)하여 결정
-			y_axis_3d = np.cross(z_axis_3d, x_axis_3d)
+			# # Z축: 오른손 법칙에 부합하도록 두 축을 외적(Cross Product)하여 결정
+			# z_axis_3d = np.cross(y_axis_3d, x_axis_3d)
 
 			# 5-3. 기존에 가지고 계시던 TF 발행 함수 호출
 			self._publish_desired_tf(predicted_position_3d, x_axis_3d, y_axis_3d, z_axis_3d)
@@ -165,8 +174,8 @@ class IncomingPointsPlotter(Node):
 
 		rotation_matrix = np.column_stack([
 			self._normalize(-x_axis),
-			self._normalize(z_axis),
 			self._normalize(y_axis),
+			self._normalize(z_axis),
 		])
 		quat = R.from_matrix(rotation_matrix).as_quat()
 		transform.transform.rotation.x = float(quat[0])
